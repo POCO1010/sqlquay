@@ -1,0 +1,65 @@
+{
+  "name": "database-workbench",
+  "displayName": "SQLQuay",
+  "description": "SQLQuay — a read-only SQL workbench with JDBC, Alibaba Cloud DMS, DDL hover and session results.",
+  "author": "POCO1010",
+  "repository": {"type":"git","url":"https://github.com/POCO1010/sqlquay.git"},
+  "homepage": "https://github.com/POCO1010/sqlquay#readme",
+  "bugs": {"url":"https://github.com/POCO1010/sqlquay/issues"},
+  "version": "0.4.0",
+  "publisher": "local-workbench",
+  "license": "UNLICENSED",
+  "engines": {"vscode": "^1.96.0"},
+  "categories": ["Other"],
+  "main": "./src/extension.cjs",
+  "activationEvents": ["onLanguage:sql", "onLanguage:python", "onLanguage:markdown", "onLanguage:java", "onLanguage:javascript", "onLanguage:javascriptreact", "onLanguage:typescript", "onLanguage:typescriptreact"],
+  "scripts": {
+    "test": "node --test test/*.test.cjs",
+    "check:public": "node scripts/check-public.cjs",
+    "package": "node scripts/package.cjs"
+  },
+  "contributes": {
+    "viewsContainers": {"activitybar": [{"id":"dbw", "title":"SQLQuay", "icon":"media/database.svg"}]},
+    "views": {"dbw":[{"id":"dbw.explorer","name":"Database"}]},
+    "commands": [
+      {"command":"dbw.connect","title":"New Connection","category":"SQLQuay","icon":"$(add)"},
+      {"command":"dbw.newQuery","title":"New Query","category":"SQLQuay","icon":"$(new-file)"},
+      {"command":"dbw.refresh","title":"Load / Refresh Tables","category":"SQLQuay","icon":"$(refresh)"},
+      {"command":"dbw.edit","title":"Edit Connection","category":"SQLQuay"},
+      {"command":"dbw.remove","title":"Remove Connection","category":"SQLQuay"},
+      {"command":"dbw.describe","title":"Properties","category":"SQLQuay","icon":"$(symbol-property)"},
+      {"command":"dbw.run","title":"Run SQL","category":"SQLQuay","icon":"$(play)"},
+      {"command":"dbw.bindConnection","title":"选择当前文件的执行连接","category":"SQLQuay","icon":"$(database)","enablement":"resourceScheme == file || editorLangId == sql"},
+      {"command":"dbw.setWorkspaceDdlConnection","title":"设置工作区默认表定义预览连接","category":"SQLQuay"},
+      {"command":"dbw.bindDdlConnection","title":"选择表定义预览连接","category":"SQLQuay","enablement":"resourceScheme == file || editorLangId == sql"},
+      {"command":"dbw.searchTables","title":"搜索已加载的表","category":"SQLQuay","icon":"$(search)"},
+      {"command":"dbw.history","title":"会话查询历史","category":"SQLQuay","icon":"$(history)"},
+      {"command":"dbw.clearHistory","title":"清除已关闭且未固定的会话历史","category":"SQLQuay"},
+      {"command":"dbw.unlock","title":"Confirm Online Query Ended and Unlock","category":"SQLQuay"}
+    ],
+    "menus": {
+      "view/title":[{"command":"dbw.connect","when":"view == dbw.explorer","group":"navigation@1"},{"command":"dbw.setWorkspaceDdlConnection","when":"view == dbw.explorer","group":"settings@1"},{"command":"dbw.searchTables","when":"view == dbw.explorer","group":"navigation@2"},{"command":"dbw.history","when":"view == dbw.explorer","group":"navigation@3"}],
+      "view/item/context":[
+        {"command":"dbw.newQuery","when":"view == dbw.explorer && viewItem =~ /^dbw-(connection|schema)$/","group":"inline@1"},
+        {"command":"dbw.refresh","when":"view == dbw.explorer && viewItem =~ /^dbw-(connection|schema|tables)$/","group":"inline@2"},
+        {"command":"dbw.describe","when":"view == dbw.explorer && viewItem == dbw-table","group":"inline"},
+        {"command":"dbw.edit","when":"view == dbw.explorer && viewItem == dbw-connection","group":"connection@1"},
+        {"command":"dbw.remove","when":"view == dbw.explorer && viewItem == dbw-connection","group":"connection@2"},
+        {"command":"dbw.searchTables","when":"view == dbw.explorer && viewItem =~ /^dbw-(connection|schema|tables)$/","group":"navigation@1"}
+      ],
+      "editor/title":[{"command":"dbw.bindConnection","when":"dbw.runnableEditor","group":"navigation@8"},{"command":"dbw.run","when":"dbw.runnableEditor","group":"navigation@9"}],
+      "editor/context":[{"command":"dbw.bindConnection","when":"dbw.runnableEditor","group":"dbw@1"},{"command":"dbw.run","when":"dbw.runnableEditor","group":"dbw@2"},{"command":"dbw.bindConnection","when":"editorHasSelection && resourceScheme == file && !dbw.runnableEditor","group":"dbw@1"},{"command":"dbw.run","when":"editorHasSelection && resourceScheme == file && !dbw.runnableEditor","group":"dbw@2"}]
+    },
+    "keybindings":[{"command":"dbw.run","key":"ctrl+enter","mac":"cmd+enter","when":"editorTextFocus && editorLangId == sql && dbw.runnableEditor"}],
+    "configuration": {
+      "title":"SQLQuay",
+      "properties":{
+        "dbWorkbench.driverJar":{"type":"string","default":"","scope":"machine","description":"Absolute path to a trusted MySQL Connector/J 8.0.12+ JAR."},
+        "dbWorkbench.javaPath":{"type":"string","default":"java","scope":"machine","description":"Java 8+ executable."},
+        "dbWorkbench.pythonPath":{"type":"string","default":"python3","scope":"machine","description":"Python 3 executable for the shared read-only query guard."},
+        "dbWorkbench.dmsWrapperPath":{"type":"string","default":"~/.sqlquay/policy/execute_safe.py","scope":"machine","description":"Approved DMS read-only wrapper; its CLI profile is fixed to dms-prod."},
+        "dbWorkbench.guardPath":{"type":"string","default":"~/.sqlquay/policy/query_guard.py","scope":"machine","description":"Installed shared SQL guard. JDBC uses the local guard, not DMS."}
+      }
+    }
+  }
+}
