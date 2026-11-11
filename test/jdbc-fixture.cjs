@@ -15,7 +15,7 @@ async function main() {
     const jar=path.join(temp,'fixture.jar');
     execFileSync('jar',['cfm',jar,manifest,'-C',driver,'.']);
     for (const script of ['jdbc_guard.py','preview_safe.py']) fs.copyFileSync(path.join(root,'scripts',script),path.join(temp,'scripts',script));
-    const original=process.env.DBW_TEST_GUARD || path.join(os.homedir(),'.sqlquay/policy/query_guard.py');
+    const original=process.env.DBW_TEST_GUARD || path.join(root,'policy','query_guard.py');
     const guard=path.join(temp,'query_guard.py');
     fs.copyFileSync(original,guard);
     fs.appendFileSync(guard,"\nfrom functools import partial\nsingle_query_lock = partial(single_query_lock, path=Path(__file__).parent / 'test.lock')\n");

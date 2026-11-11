@@ -2,10 +2,13 @@
 const {test}=require('node:test'),assert=require('node:assert/strict');
 const {issues}=require('../scripts/check-public.cjs');
 const manifest=require('../package.json');
-test('SQLQuay keeps the installed extension identity, settings and query entrypoints',()=>{
+test('SQLQuay declares the confirmed publisher and MIT license without renaming query entrypoints',()=>{
   assert.equal(manifest.displayName,'SQLQuay');
-  assert.equal(manifest.publisher+'.'+manifest.name,'local-workbench.database-workbench');
-  assert.equal(manifest.contributes.configuration.properties['dbWorkbench.guardPath'].default,'~/.sqlquay/policy/query_guard.py');
+  assert.equal(manifest.license,'MIT');
+  assert.equal(manifest.icon,'media/icon.png');
+  assert.ok(manifest.contributes.commands.some(c=>c.command==='dbw.importLegacy'));
+  assert.equal(manifest.publisher+'.'+manifest.name,'TomMajor.sqlquay');
+  assert.equal(manifest.contributes.configuration.properties['dbWorkbench.guardPath'].default,'');
   assert.ok(manifest.contributes.commands.some(c=>c.command==='dbw.run'));
   assert.equal(manifest.repository.url,'https://github.com/POCO1010/sqlquay.git');
 });

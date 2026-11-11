@@ -5,7 +5,7 @@ const temp=fs.mkdtempSync(path.join(os.tmpdir(),'dbw-dms-wrapper-'));
 async function main() {
   const oldPath=process.env.PATH;
   try {
-    const skill=process.env.DBW_TEST_DMS_SCRIPTS || path.join(os.homedir(),'.sqlquay/policy');
+    const skill=process.env.DBW_TEST_DMS_SCRIPTS || path.join(__dirname,'..','policy');
     const wrapper=path.join(temp,'execute_safe.py'), guard=path.join(temp,'query_guard.py'), log=path.join(temp,'calls');
     fs.copyFileSync(path.join(skill,'execute_safe.py'),wrapper);
     fs.copyFileSync(path.join(skill,'query_guard.py'),guard);

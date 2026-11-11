@@ -17,9 +17,13 @@ jobs:
         with:
           distribution: temurin
           java-version: '8'
+      - run: npm ci --ignore-scripts
       - run: npm run check:public
       - run: npm test
+      - run: npm run test:jdbc
+      - run: npm run test:dms
       - run: npm run package
+      - run: npm run package:migration
       - uses: actions/upload-artifact@v7
         with:
           name: sqlquay-vsix

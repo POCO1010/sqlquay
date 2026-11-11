@@ -1,22 +1,31 @@
 {
-  "name": "database-workbench",
+  "name": "sqlquay",
   "displayName": "SQLQuay",
   "description": "SQLQuay — a read-only SQL workbench with JDBC, Alibaba Cloud DMS, DDL hover and session results.",
   "author": "POCO1010",
   "repository": {"type":"git","url":"https://github.com/POCO1010/sqlquay.git"},
   "homepage": "https://github.com/POCO1010/sqlquay#readme",
   "bugs": {"url":"https://github.com/POCO1010/sqlquay/issues"},
-  "version": "0.4.0",
-  "publisher": "local-workbench",
-  "license": "UNLICENSED",
+  "version": "0.5.0",
+  "publisher": "TomMajor",
+  "license": "MIT",
   "engines": {"vscode": "^1.96.0"},
   "categories": ["Other"],
+  "preview": true,
+  "icon": "media/icon.png",
+  "keywords": ["SQL","JDBC","DMS","MySQL","Doris","SelectDB","database"],
   "main": "./src/extension.cjs",
   "activationEvents": ["onLanguage:sql", "onLanguage:python", "onLanguage:markdown", "onLanguage:java", "onLanguage:javascript", "onLanguage:javascriptreact", "onLanguage:typescript", "onLanguage:typescriptreact"],
+  "devDependencies": {"@vscode/vsce":"4.1.0"},
   "scripts": {
     "test": "node --test test/*.test.cjs",
     "check:public": "node scripts/check-public.cjs",
-    "package": "node scripts/package.cjs"
+    "package": "node scripts/package.cjs",
+    "vscode:prepublish": "node scripts/build-jdbc.cjs",
+    "test:jdbc": "node test/jdbc-fixture.cjs",
+    "test:dms": "node test/dms-fixture.cjs",
+    "test:migration:host": "node test/run-migration-host.cjs",
+    "package:migration": "node scripts/package-migration.cjs"
   },
   "contributes": {
     "viewsContainers": {"activitybar": [{"id":"dbw", "title":"SQLQuay", "icon":"media/database.svg"}]},
@@ -35,7 +44,8 @@
       {"command":"dbw.searchTables","title":"搜索已加载的表","category":"SQLQuay","icon":"$(search)"},
       {"command":"dbw.history","title":"会话查询历史","category":"SQLQuay","icon":"$(history)"},
       {"command":"dbw.clearHistory","title":"清除已关闭且未固定的会话历史","category":"SQLQuay"},
-      {"command":"dbw.unlock","title":"Confirm Online Query Ended and Unlock","category":"SQLQuay"}
+      {"command":"dbw.unlock","title":"Confirm Online Query Ended and Unlock","category":"SQLQuay"},
+      {"command":"dbw.importLegacy","title":"从旧版 Workbench 导入连接和当前工作区绑定","category":"SQLQuay"}
     ],
     "menus": {
       "view/title":[{"command":"dbw.connect","when":"view == dbw.explorer","group":"navigation@1"},{"command":"dbw.setWorkspaceDdlConnection","when":"view == dbw.explorer","group":"settings@1"},{"command":"dbw.searchTables","when":"view == dbw.explorer","group":"navigation@2"},{"command":"dbw.history","when":"view == dbw.explorer","group":"navigation@3"}],
@@ -57,8 +67,8 @@
         "dbWorkbench.driverJar":{"type":"string","default":"","scope":"machine","description":"Absolute path to a trusted MySQL Connector/J 8.0.12+ JAR."},
         "dbWorkbench.javaPath":{"type":"string","default":"java","scope":"machine","description":"Java 8+ executable."},
         "dbWorkbench.pythonPath":{"type":"string","default":"python3","scope":"machine","description":"Python 3 executable for the shared read-only query guard."},
-        "dbWorkbench.dmsWrapperPath":{"type":"string","default":"~/.sqlquay/policy/execute_safe.py","scope":"machine","description":"Approved DMS read-only wrapper; its CLI profile is fixed to dms-prod."},
-        "dbWorkbench.guardPath":{"type":"string","default":"~/.sqlquay/policy/query_guard.py","scope":"machine","description":"Installed shared SQL guard. JDBC uses the local guard, not DMS."}
+        "dbWorkbench.dmsWrapperPath":{"type":"string","default":"","scope":"machine","description":"Optional approved execute_safe.py override. Empty uses the bundled wrapper with profile dms-prod."},
+        "dbWorkbench.guardPath":{"type":"string","default":"","scope":"machine","description":"Optional approved query_guard.py override. Empty uses the bundled read-only policy."}
       }
     }
   }

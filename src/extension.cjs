@@ -9,6 +9,8 @@ const {languages,regionAt,selectedSql} = require('./embedded.cjs');
 const {suggestions,ddlColumns} = require('./completion.cjs');
 const {Sessions} = require('./sessions.cjs');
 const {connectHtml,resultHtml} = require('./webviews.cjs');
+const {importer}=require('./migration.cjs');
+const path=require('node:path');
 
 // Version 0.1.0 stored JDBC connections without a channel field.
 const channelOf = c => c.engine === 'demo' ? 'demo' : c.channel === 'dms' ? 'dms' : 'jdbc';
@@ -23,7 +25,7 @@ function activate(context) {
   const ddlCache = new Map(), ddlPending = new Map();
   const changed = new vscode.EventEmitter();
   const sessions=new Sessions();
-  let activeId = DEMO.id, running = false, online = false, serial = 0;
+  let activeId = DEMO.id, running = false, online = false, importing = false, serial = 0;
   const all = () => [DEMO,...context.globalState.get('connections',[])];
   const live = old => {
     const current = all().find(item => item.id === old.id);
@@ -93,7 +95,10 @@ function activate(context) {
 
   function register(name, callback) {
     context.subscriptions.push(commands.registerCommand('dbw.' + name, async (...args) => {
-      try { return await callback(...args); }
+      try {
+        if(importing) throw Error('Wait for the legacy migration to finish.');
+        return await callback(...args);
+      }
       catch (error) { void window.showErrorMessage('SQLQuay: ' + error.message); }
     }));
   }
@@ -115,6 +120,7 @@ function activate(context) {
       return demoQuery(sql);
     }
     if (!workspace.isTrusted) throw Error('Online queries are disabled in untrusted workspaces.');
+    if(importing) throw Error('Wait for the legacy migration to finish.');
     if (online) throw Error('An online operation is already running.');
     const pending = pendingChannel();
     if (pending) throw Error(pending + ' stopped without a safe continuation. Verify its state and unlock before using either online connection.');
@@ -123,10 +129,10 @@ function activate(context) {
     try {
       const settings = cfg(), python = settings.get('pythonPath');
       const execute = channel === 'dms'
-        ? () => makeDms({python,wrapper:settings.get('dmsWrapperPath')})(connection,sql,limit,table)
+        ? () => makeDms({python,wrapper:settings.get('dmsWrapperPath') || path.join(context.extensionPath,'policy','execute_safe.py')})(connection,sql,limit,table)
         : async () => {
           const auth = credentials ?? await credentialsFor(connection);
-          return makeJdbc({java:settings.get('javaPath'),python,jar:settings.get('driverJar'),guard:settings.get('guardPath')},context.extensionPath)(connection,auth,sql,limit,table);
+          return makeJdbc({java:settings.get('javaPath'),python,jar:settings.get('driverJar'),guard:settings.get('guardPath') || path.join(context.extensionPath,'policy','query_guard.py')},context.extensionPath)(connection,auth,sql,limit,table);
         };
       await context.globalState.update(key,true);
       try {
@@ -563,6 +569,15 @@ function activate(context) {
       publish(entry);
     } finally {running=false;}
   }
+  const migration=importer(context,vscode,()=>{changed.fire();setEditorContext();},busy=>{importing=busy;});
+  register('importLegacy',async()=>{
+    if(online || running) throw Error('Wait for the active query to finish.');
+    const result=await migration.start();
+    if(result?.alreadyImported) window.setStatusBarMessage('当前工作区已导入旧版配置。',4000);
+    else if(result && !result.cancelled) window.setStatusBarMessage(`已导入 ${result.connections} 个连接、${result.bindings} 个当前工作区绑定；旧数据保留。`,6000);
+    return result;
+  });
   setEditorContext();
+  return {importLegacyData:migration.receive};
 }
 module.exports = {activate};

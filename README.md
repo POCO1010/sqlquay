@@ -2,24 +2,26 @@
 
 原名 Database Workbench。独立实现的 VS Code 只读 SQL 工作台。JDBC 与 DMS 使用同一套连接表单、数据库对象树、绑定 SQL 编辑器和多结果面板与会话内查询历史。
 
+![SQLQuay 查询结果与分阶段耗时](docs/previews/result.png)
+
 ## 当前发行范围
 
-离线 Demo 可直接使用。在线连接需要本机安装 Java/Python、可信 JDBC 驱动及受控策略脚本；DMS 还需要已配置的阿里云 CLI。策略脚本不随仓库或 VSIX 分发。默认目录为 `~/.sqlquay/policy/`，可用机器设置指定其他已批准路径。
+离线 Demo 可直接使用。在线连接当前支持 macOS / Linux，随扩展附带 MIT 许可的只读策略，无需下载私人脚本。JDBC 需要 Java 8+、Python 3.10+ 和可信 JDBC 驱动；DMS 需要 Python 3.10+、已配置的阿里云 CLI 及现有 DMS 插件。Windows 当前可用离线 Demo，在线通道暂未支持。
 
-目前保留扩展 ID `local-workbench.database-workbench`、`dbWorkbench.*` 设置和 `dbw.*` 命令，以兼容已有连接、SecretStorage 和文件绑定。展示名称与新安装包名称为 **SQLQuay**。
+正式发行 ID 为 **TomMajor.sqlquay**，保留 `dbWorkbench.*` 设置和 `dbw.*` 命令。旧版 `local-workbench.database-workbench` 的连接、凭据和工作区绑定可通过本机迁移助手导入；凭据不写导出文件，旧数据保留。[旧版迁移步骤](docs/MIGRATION.md)
 
 [版本记录](CHANGELOG.md) · [GitHub 维护与 Marketplace 上架](docs/PUBLISHING.md)
 
 ## 先用离线 Demo 跑通
 
-1. 在 VS Code 的扩展视图选择 **Install from VSIX…**，打开 `artifacts/sqlquay-0.4.0.vsix`。
+1. 在 VS Code 的扩展视图选择 **Install from VSIX…**，打开 `artifacts/sqlquay-0.5.0.vsix`。
 2. 打开活动栏 **SQLQuay** → **Local Demo**，点击右侧 **New Query**。
 3. 按 `Cmd/Ctrl+Enter`，或点击 SQL 编辑器右上的 ▶。每次运行在旁边打开独立的 **Query Result #编号**，不会覆盖原结果。结果页改 SQL 后重新运行也会新开结果。
 4. 对象树的 **sandbox → Tables → products** 可查看字段。Demo 是进程内固定数据，只识别 `SELECT 1 AS probe` 及从 `products` 读取显式列的简单查询（可加 `WHERE id = …` 和 `LIMIT`）；不联网、不访问真实数据库。
 
 ## 用 JDBC 读你自己的数据库
 
-在 VS Code 用户设置中把 `dbWorkbench.driverJar` 设为可信的 MySQL Connector/J 8.0.12 或更新版 JAR 的绝对路径。需要 Java 8+、Python 3 和本机受信任的 `query_guard.py`（默认 `~/.sqlquay/policy/query_guard.py`）；需要时用 `dbWorkbench.javaPath`、`dbWorkbench.pythonPath`、`dbWorkbench.guardPath` 指定位置。JDBC 不调用 DMS CLI。
+在 VS Code 用户设置中把 `dbWorkbench.driverJar` 设为可信的 MySQL Connector/J 8.0.12 或更新版 JAR 的绝对路径。需要 Java 8+、Python 3.10+，默认使用扩展附带的 `policy/query_guard.py`；需要时用 `dbWorkbench.javaPath`、`dbWorkbench.pythonPath` 指定解释器。`dbWorkbench.guardPath` 留空使用附带策略，或显式指向组织批准的同名脚本。JDBC 不调用 DMS CLI。
 
 在 **Database** 标题右侧点 **+**，选择 **JDBC**，再选择 MySQL 或 Apache Doris / SelectDB，填写主机、端口、精确库名和只读账号。**Save** 只保存，**Connect** 先读取当前库的表清单、成功后保存。密码只由 VS Code SecretStorage 保存，不进入连接清单或命令参数。JDBC 默认使用 **TLS → Verify server identity**，加密并校验服务器证书与主机名。对于不提供 TLS 的端点，可以在单条连接里显式选 **Disabled (unencrypted)** 并确认。此模式不验证服务端身份，SQL 和结果不加密；公网生产优先用 DMS。原连接保留默认校验，查询失败不会自动切换 TLS 模式。切换或编辑连接后，原查询编辑器不会无提示改绑。
 
@@ -29,7 +31,7 @@
 
 在 **Database → + → DMS** 填写 **Search keyword**（DMS 搜索关键词）、**Schema**（精确库名）、**Database ID**（已核实的 DMS 数字 ID）。**Save** 只保存，**Connect** 先通过 DMS 读取表清单再保存。打开 **New Query** 后可先运行预填的 `SELECT 1 AS probe;`。对象树和结果标题会标明 JDBC 或 DMS。
 
-DMS 使用本机已安装的 `aliyun-cli-dms-enterprise` 和批准的 `execute_safe.py`（默认 `~/.sqlquay/policy/execute_safe.py`）。封装器固定使用 `dms-prod`，并且只解析 `product` 环境；测试库继续使用 JDBC。DMS 不需要数据库密码或 Java，也不自动安装或更新 CLI 插件。若封装器安装在非默认路径，用机器设置 `dbWorkbench.dmsWrapperPath` 指向批准的 `execute_safe.py`（默认 `~/.sqlquay/policy/execute_safe.py`）。SQL 通过同一封装器检查目标、有界条件、索引、EXPLAIN 和扫描上限。
+DMS 使用本机已安装的 `aliyun-cli-dms-enterprise` 和扩展附带的 `policy/execute_safe.py`。封装器固定使用 `dms-prod`，并且只解析 `product` 环境；测试库继续使用 JDBC。DMS 不需要数据库密码或 Java，也不自动安装或更新 CLI 插件。若封装器安装在非默认路径，用机器设置 `dbWorkbench.dmsWrapperPath` 指向扩展附带的 `policy/execute_safe.py`。SQL 通过同一封装器检查目标、有界条件、索引、EXPLAIN 和扫描上限。
 
 ## 直接执行已有 SQL 文件
 
@@ -87,12 +89,12 @@ JDBC 与 DMS 返回本次测量的连接、预检、执行耗时；结果页另�
 
 ## 开发
 
-`npm test` 跑 Node 单测；`npm run package` 需要 JDK 与 zip 工具。VSIX 不内置 Connector/J。原版对照见 [第一阶段记录](docs/PHASE_1.md)，双通道验收见 [第二阶段记录](docs/PHASE_2.md)。
+开发需要 Node.js 22+、JDK 8+、Python 3.10+。先运行 `npm ci --ignore-scripts`，再用 `npm test`、`npm run test:jdbc` 和 `npm run test:dms` 验证。`npm run package` 先编译 Java 8 桥接类，再通过官方 `@vscode/vsce` 生成 VSIX；`npm run package:migration` 生成仅供旧用户本机使用的迁移助手。VSIX 不内置 Connector/J。历史实现记录见 [第一阶段](docs/PHASE_1.md) 和 [第二阶段](docs/PHASE_2.md)。
 
-GitHub CI 检查公开内容、运行单测并构建 VSIX，产物保留在 Actions 中。CI 不连接真实数据库。JDBC/DMS 完整离线夹具需要本机受信任的策略脚本，见上述阶段记录。
+GitHub CI 安装锁定的开发依赖，检查公开内容、运行单测和两种通道的离线夹具，再构建 VSIX。夹具使用随仓库分发的策略、合成驱动与假 CLI，不访问真实数据库或本机账号。
 
 ## 仓库中的数据
 
 测试及截图只用合成数据。数据库连接和密码由本机 VS Code 保存，结果及历史只存会话内存；这些内容不提交仓库。请勿把真实账号、连接地址、业务 SQL、日志或含真实数据的截图放进 Issue 或提交。
 
-`npm run check:public` 检查跟踪文件中的私人主目录、内部地址、令牌及硬编码密码等常见泄漏。截图仍需人工检查。当前许可证保持 `UNLICENSED`，公开分发许可在上架前确认。
+`npm run check:public` 检查跟踪文件中的私人主目录、内部地址、令牌及硬编码密码等常见泄漏。截图仍需人工检查。源码及附带策略使用 [MIT 许可](LICENSE)；外部运行依赖见 [分发说明](THIRD_PARTY_NOTICES.md)。

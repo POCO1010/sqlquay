@@ -29,10 +29,10 @@ exports.run = async function() {
   try {
   const mark=message=>fs.appendFileSync(process.env.DBW_HOST_RESULT+'.progress',message+'\n');
   mark('start');
-  const extension=vscode.extensions.getExtension('local-workbench.database-workbench');
+  const extension=vscode.extensions.getExtension('TomMajor.sqlquay');
   assert.ok(extension);
   assert.equal(extension.packageJSON.displayName,'SQLQuay');
-  assert.equal(extension.packageJSON.version,'0.4.0');
+  assert.equal(extension.packageJSON.version,require('../package.json').version);
   const file=vscode.Uri.joinPath(vscode.workspace.workspaceFolders[0].uri,'existing.sql');
   const source='SELECT id FROM products;\n';
   await vscode.workspace.fs.writeFile(file,Buffer.from(source));

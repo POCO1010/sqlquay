@@ -1,0 +1,15 @@
+**
+!package.json
+!README.md
+!CHANGELOG.md
+!LICENSE
+!THIRD_PARTY_NOTICES.md
+!src/{completion,ddl,dms,embedded,extension,jdbc,migration,query,sessions,webviews}.cjs
+!media/**
+!policy/**
+!scripts/jdbc_guard.py
+!scripts/preview_safe.py
+!scripts/dms_timed.py
+!build/jdbc/**
+**/__pycache__/**
+**/*.pyc

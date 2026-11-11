@@ -1,57 +1,49 @@
-# SQLQuay 的 GitHub 维护与 Marketplace 上架
+# SQLQuay 的首发与维护
 
-## 先维护可复现的版本
+## 已确定的发行身份
 
-仓库：<https://github.com/POCO1010/sqlquay>。默认分支为 `main`。功能分支按事项命名。
+- 展示名：SQLQuay。
+- Marketplace Publisher：`TomMajor`，由所有者完成创建。
+- 正式扩展 ID：`TomMajor.sqlquay`。
+- 首发包：`artifacts/sqlquay-0.5.0.vsix`，标记 Preview。
+- 许可证：MIT。外部 Java、Python、阿里云 CLI 与 Connector/J 不随包分发。
+- GitHub：<https://github.com/POCO1010/sqlquay>，默认分支 `main`。
 
-本地检查：
+旧版身份改为正式身份时需要迁移。已有用户先按 [本机迁移步骤](MIGRATION.md) 操作；新用户无需迁移助手。
+
+## 从源码生成可上传包
+
+需要 Node.js 22+、JDK 8+ 和 Python 3.10+，在线策略目前支持 macOS / Linux。
 
 ```sh
-npm run check:public
+npm ci --ignore-scripts
 npm test
+npm run test:jdbc
+npm run test:dms
+npm run check:public
 npm run package
 ```
 
-构建产物为 `artifacts/sqlquay-<version>.vsix`。不把构建目录、安装包、日志或本机配置提交到 Git；GitHub Actions 会保存本次 CI 构建的 VSIX。
+`npm run package` 调用官方 `@vscode/vsce`，先编译 Java 8 兼容桥接类；包含声明的源码、PNG 图标、桥接类、三个 Python 入口和附带策略。`.vscodeignore` 排除测试、原始分析材料、依赖、日志及其他安装包。按当前锁定依赖构建，不全局安装发布工具。
 
-CI 只运行公开内容检查、Node 单测和打包，不连接数据库，不读取本机策略脚本或凭据。完整 JDBC/DMS 离线夹具由维护者在已批准的本地策略环境运行。打包使用 Java 8，保持桥接类与 Java 8+ 的兼容性。
+JDBC/DMS 的只读策略位于 `policy/`，没有真实连接、数据库 ID 或账号；设置留空即使用附带策略。组织批准的外置策略仍可显式指定，迁移旧安装时保留原策略路径和锁范围。两种方式继续做目标核对、EXPLAIN、扫描阈值、单查询锁及超时不重试。
 
-## 改名如何兼容已有安装
+## 首次手动上传
 
-SQLQuay 0.4.0 改展示名称、命令分类、页面标题和 VSIX 文件名。扩展 ID `local-workbench.database-workbench`、命令 `dbw.*`、设置 `dbWorkbench.*` 和存储键保留，已有连接和文件绑定沿用原命名空间。
+1. 在独立 VS Code 配置中安装正式 VSIX，完成 Demo、两种通道的离线夹具与迁移验证。
+2. 打开 [TomMajor 管理页](https://marketplace.visualstudio.com/manage/publishers/TomMajor)。
+3. 新建 Visual Studio Code 扩展，只上传 `sqlquay-0.5.0.vsix`。不要上传 `sqlquay-legacy-migration-0.4.1.vsix`。
+4. 根据平台返回的校验结果处理，核对展示名、Publisher、版本、MIT 许可和安装说明。
+5. 从市场下载到独立配置验收，再安排已有用户迁移；不要删除旧版数据或唯一可用的旧 VSIX。
 
-公开代码的策略默认目录为 `~/.sqlquay/policy/`：
+官方支持打包后手动上传：[发布指南](https://code.visualstudio.com/api/working-with-extensions/publishing-extension)。本地打包不需要 Publisher Token。平台上传由所有者确认执行。
 
-- JDBC：`query_guard.py`。
-- DMS：`execute_safe.py` 及它需要的同目录模块。
+## GitHub CI 与后续自动发布
 
-这些文件必须来自使用者批准的策略包。可通过机器设置指定路径；扩展不会下载或自动更换策略。已有安装可在本机用该通用目录映射到原批准策略，映射不进入仓库。
+当前 CI 只检查、运行离线测试和打包，不连接真实数据库，也不发布 Marketplace。手动上传首发不依赖 GitHub Actions。
 
-## 公开前检查的对象
+后续采用 GitHub Actions Trusted Publishing（OIDC），绑定 `POCO1010/sqlquay` 与单独的发布工作流，不保存长期发布令牌。需要发布时再配置策略与发布环境，不把发布混入普通 CI。[官方 Trusted Publishing](https://code.visualstudio.com/api/working-with-extensions/publishing-extension#publish-with-github-actions-and-trusted-publishing)
 
-- Git 跟踪文件：源码、文档和测试不包含私人用户名、个人主目录、真实连接地址、业务数据、令牌或密码。
-- 图片：只保留 Demo 和合成测试截图；检查可见内容与文本元数据。
-- 提交元数据：使用维护者 GitHub 的 noreply 邮箱，不使用私人邮箱。
-- 安装包：只包含运行代码、桥接类和公开说明；不包含策略包、驱动 JAR、原插件包或反编译资源。
-- Git 忽略规则：排除 `.env*`、日志、依赖目录、构建目录和 VSIX。`check:public` 在每次 CI 中复查常见文本泄漏。
+## 每次提交检查公开内容
 
-## 上架前还缺什么
-
-1. **正式 Publisher。** 当前 `local-workbench` 是本地发行标识，尚未核实 Marketplace 发布权限。先注册并确定 Publisher ID；它与 GitHub 账号是两套身份。
-2. **最终扩展 ID 与迁移。** VS Code 的扩展 ID 为 `publisher.name`。若正式发布时更换其中任一字段，先完成连接、SecretStorage 和文件绑定的迁移与回归，再让已有用户升级。[Manifest 文档](https://code.visualstudio.com/api/references/extension-manifest)
-3. **用户可安装的策略依赖。** 现有 JDBC/DMS 都需要外置批准脚本。首个通用版本应提供有明确许可、可独立安装的策略包，或明确面向自备策略的受控环境。不能把维护者的私人脚本目录当成用户安装条件。
-4. **许可与发布资料。** 当前保持 `UNLICENSED`。由仓库所有者决定分发许可，补充适用的许可证、第三方声明、PNG 图标、当前版本截图和说明。活动栏 SVG 可继续使用；Marketplace 的 `icon` 不能使用 SVG。[官方发布指南](https://code.visualstudio.com/api/working-with-extensions/publishing-extension)
-5. **官方打包验证。** 现有脚本生成的 VSIX 已用于本地安装；正式上传前用 `@vscode/vsce` 校验和打包，明确排除测试、内部材料和不需要的资源。
-
-## 首次发布推荐手动上传，之后再接 OIDC
-
-核对日期：2026-11-11。
-
-1. 使用维护者自己的 Microsoft 身份登录 [Marketplace Publisher 管理页](https://marketplace.visualstudio.com/manage)，创建 Publisher；Publisher ID 创建后不可更改。
-2. 确定最终 ID、许可和安装依赖，补齐上面的发布资料。
-3. 用官方 `vsce` 构建正式 VSIX，完成独立 VS Code、JDBC/DMS 离线夹具及公开内容检查。
-4. 在管理页上传 VSIX，核对扩展详情、名称、版本和下载后的安装结果。[官方首次发布流程](https://code.visualstudio.com/api/working-with-extensions/publishing-extension)
-
-持续发布优先用 GitHub Actions **Trusted Publishing（OIDC）**，不在仓库保存长期发布令牌。策略需绑定准确的仓库所有者、仓库名、工作流文件和可选 Environment；发布任务授予 `id-token: write` 后执行 `vsce publish --oidc`。当前 CI 不包含市场发布动作。[官方 Trusted Publishing 说明](https://code.visualstudio.com/api/working-with-extensions/publishing-extension#publish-with-github-actions-and-trusted-publishing)
-
-官方公告指出 Azure DevOps 的全局 PAT 将于 2026-12-01 停用，新配置优先选联合身份。[PAT 停用公告](https://devblogs.microsoft.com/devops/retirement-of-global-personal-access-tokens-in-azure-devops/)
+不要提交真实连接、密码、业务 SQL、日志、驱动 JAR、个人策略目录、原插件包或反编译资源。截图只使用合成数据，并检查可见内容和元数据。保持 GitHub noreply 提交身份，按相关路径提交与普通推送，不改写远端历史。
