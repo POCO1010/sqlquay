@@ -2,7 +2,7 @@
 const {test} = require('node:test');
 const assert = require('node:assert/strict');
 const fs = require('node:fs'), os = require('node:os'), path = require('node:path');
-const {dmsConfig,makeDms,DmsStopped} = require('../src/dms.cjs');
+const {dmsConfig,makeDms,DmsStopped,listDmsProfiles,parseProfiles} = require('../src/dms.cjs');
 const {dmsReadonly} = require('../src/query.cjs');
 const target = {channel:'dms',name:'Fixture',database:'fixture',keyword:'fixture',databaseId:'9007199254740993'};
 const ok = (stdout,stderr='') => ({code:0,stdout,stderr});
@@ -26,7 +26,7 @@ test('uses only plugin list then approved wrapper, with exact target and result 
   assert.deepEqual(calls[0],['aliyun',['plugin','list']]);
   assert.equal(calls[1][0],'python3');
   assert.equal(path.basename(calls[1][1][2]),'dms_timed.py');
-  assert.deepEqual(calls[1][1].slice(4),['--database-keyword=fixture','--schema=fixture','--db-id='+target.databaseId,'--sql=DESCRIBE fixture']);
+  assert.deepEqual(calls[1][1].slice(4),['--database-keyword=fixture','--schema=fixture','--db-id='+target.databaseId,'--profile=dms-prod','--region=cn-hangzhou','--sql=DESCRIBE fixture']);
   assert.deepEqual(rows.columns.map(x=>x.name),['Field','Type','Sample','Empty','Extra']);
   assert.deepEqual(rows.rows,[['price','DECIMAL','9007199254740994.01',null,null],['id','BIGINT',null,null,'123"x']]);
   const first=await adapter(t,ok(data))(target,'DESCRIBE fixture;',1);
@@ -57,4 +57,25 @@ test('validates DMS connection and rejects unsafe SQL before CLI execution', asy
     'SELECT GET_LOCK(1, 1)','EXPLAIN ANALYZE SELECT 1','SELECT id FROM t FOR UPDATE','SELECT /*! 1 */ 1']) await assert.rejects(query(target,sql));
   assert.equal(calls.length,0);
   assert.equal(dmsReadonly("SELECT 'SHOW CREATE USER';"),"SELECT 'SHOW CREATE USER'");
+});
+
+test('named profiles are listed without exposing credential columns or changing the active profile',async()=>{
+ const output='Profile | Credential | Valid | Region | Language\n'+'team-fixture * | AK:***fixture | Valid | cn-beijing | en\n'+'expired | STS:***fixture | Invalid | cn-hangzhou | en\n';
+ const expected=[{name:'team-fixture',region:'cn-beijing',valid:true},{name:'expired',region:'cn-hangzhou',valid:false}];
+ assert.deepEqual(parseProfiles(output),expected);
+ const calls=[];assert.deepEqual(await listDmsProfiles(async(command,args)=>{calls.push([command,args]);return ok(output);}),expected);
+ assert.deepEqual(calls,[['aliyun',['configure','list']]]);
+ assert.ok(!JSON.stringify(expected).includes('AK:'));
+ assert.deepEqual(parseProfiles('no profiles'),[]);
+ await assert.rejects(listDmsProfiles(async()=>{throw Error('private fixture error');}),/official CLI/);
+});
+test('ordinary and preview queries carry the selected profile and region; legacy defaults remain',async t=>{
+ const calls=[];const query=adapter(t,ok(data),calls);
+ const custom={...target,profile:'team-fixture',region:'cn-beijing'};
+ await query(custom,'SELECT 1');
+ assert.ok(calls[1][1].includes('--profile=team-fixture'));assert.ok(calls[1][1].includes('--region=cn-beijing'));
+ await assert.rejects(query(custom,undefined,100,'products'),/Invalid preview columns/);
+ assert.ok(calls[3][1].includes('--profile=team-fixture'));assert.ok(calls[3][1].includes('--region=cn-beijing'));
+ for(const profile of ['--help','x\nprofile']) assert.throws(()=>dmsConfig({...target,profile}),/valid Aliyun/);
+ assert.throws(()=>dmsConfig({...target,region:'x;bad'}),/valid Aliyun/);
 });

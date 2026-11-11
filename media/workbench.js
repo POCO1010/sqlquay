@@ -4,7 +4,10 @@
   const $ = id => document.getElementById(id);
   if (document.body.dataset.view === 'connect') {
     const form = $('connection'), feedback = $('feedback');
-    let engine = 'mysql', editing = false;
+    let engine = 'mysql', editing = false, profiles = [];
+    const loadProfiles=()=>{ $('dms-auth-status').textContent='Reading local CLI profiles…'; vscode.postMessage({type:'loadDmsProfiles'}); };
+    $('dms-profiles').onclick=loadProfiles;
+    $('dms-auth').onclick=()=>vscode.postMessage({type:'configureDms'});
     const method = () => form.elements.channel.value;
     const working = busy => {
       const dms = method() === 'dms';
@@ -17,7 +20,12 @@
       for (const control of form.querySelectorAll('[name="name"],[name="group"],button[type="submit"]')) control.disabled = busy;
     };
     form.addEventListener('change', e => {
-      if (e.target.name === 'channel') { feedback.textContent = ''; working(false); }
+      if (e.target.name === 'channel') { feedback.textContent = ''; working(false); if(method()==='dms') loadProfiles(); }
+      if(e.target.name==='profile') {
+        const selected=profiles.find(p=>p.name===form.elements.profile.value);
+        form.elements.region.value=selected?.region ?? '';
+        $('dms-auth-status').textContent=selected?.valid ? 'Authentication uses the selected local CLI profile.' : 'Configure or refresh this profile in your terminal, then refresh the list.';
+      }
       if (e.target.name === 'sslMode') working(false);
       if (e.target.name !== 'engine') return;
       const oldDefault = engine === 'mysql' ? '3306' : '9030';
@@ -40,18 +48,29 @@
     $('close').onclick = () => vscode.postMessage({type:'close'});
     window.addEventListener('message', ({data:m}) => {
       if (m?.type === 'configure' && m.connection) {
-        const {channel, name, group, database, engine:kind, host, port, keyword, databaseId, sslMode} = m.connection;
+        const {channel, name, group, database, engine:kind, host, port, keyword, databaseId, sslMode, profile, region} = m.connection;
         $('heading').textContent = 'Edit connection';
         editing = true;
         form.elements.channel.value = channel;
-        const values = channel === 'dms' ? {name,group,schema:database,keyword,databaseId} : {name,group,database,engine:kind,host,port,sslMode:sslMode ?? 'VERIFY_IDENTITY'};
+        const values = channel === 'dms' ? {name,group,schema:database,keyword,databaseId,region:region??'cn-hangzhou'} : {name,group,database,engine:kind,host,port,sslMode:sslMode ?? 'VERIFY_IDENTITY'};
         for (const [key,value] of Object.entries(values)) form.elements[key].value = value ?? '';
         if (channel === 'jdbc') {
           form.elements.user.required = false;
           form.elements.user.placeholder = 'Leave blank to keep credentials';
           engine = kind;
         }
+        if(channel==='dms') {
+          form.elements.profile.add(new Option(profile??'dms-prod',profile??'dms-prod',true,true));loadProfiles();
+        }
         working(false);
+      }
+      if(m?.type==='dmsProfiles') {
+        const selected=form.elements.profile.value;
+        profiles=Array.isArray(m.profiles) ? m.profiles : [];
+        form.elements.profile.replaceChildren(new Option('Choose a configured profile',''),...profiles.map(p=>new Option(p.name+' · '+p.region+(p.valid?'':' · authentication needed'),p.name)));
+        if(selected && !profiles.some(p=>p.name===selected)) form.elements.profile.add(new Option(selected+' · not found locally',selected));
+        form.elements.profile.value=selected;
+        $('dms-auth-status').textContent=m.message || (profiles.length ? 'Select a local CLI profile. Region can be adjusted for your DMS service.' : 'No named profile found. Configure CLI authentication in the terminal, then refresh.');
       }
       if (m?.type === 'error') { feedback.textContent = m.message; working(false); }
     });

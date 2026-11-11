@@ -14,8 +14,8 @@ function setup(options={}) {
   const dms={id:'dms-1',revision:'r2',channel:'dms',name:'DMS fixture',group:'',keyword:'sandbox',database:'sandbox',databaseId:'42'};
   const source=context([['connections',[jdbc,dms]],['jdbcPending',true]],[[
     'ddlConnection:workspaceDefault',{id:dms.id,revision:dms.revision}],['sqlConnection:file:///workspace/existing.sql',{id:jdbc.id,revision:jdbc.revision}],['ddlConnection:file:///workspace/other.sql',{id:jdbc.id,revision:jdbc.revision}],['unrelated','leave in source']],[['jdbc:'+jdbc.id,JSON.stringify({user:'reader',password:'fixture'})]]);
-  const destination=context(options.global,options.workspace),settings=new Map(options.settings),busy=[],notices=[];
-  const vscode={ConfigurationTarget:{Global:1},workspace:{getConfiguration:()=>({inspect:key=>({globalValue:settings.get(key)}),update:async(key,value)=>value===undefined?settings.delete(key):settings.set(key,value)})},window:{showWarningMessage:async(text,_options,action)=>{notices.push(text);return options.cancel?undefined:action;}},extensions:{getExtension:id=>id===LEGACY_ID ? {packageJSON:{sqlquayMigrationHelper:options.helper!==false},activate:async()=>({migrate:token=>sendLegacy(source,vscode,token)})} : id===PUBLIC_ID ? {isActive:true,exports:{importLegacyData:(...args)=>bridge.receive(...args)}} : undefined}};
+  const destination=context(options.global,options.workspace,options.secrets),settings=new Map(options.settings),busy=[],notices=[];
+  const vscode={ConfigurationTarget:{Global:1},workspace:{getConfiguration:()=>({inspect:key=>({globalValue:settings.get(key)}),update:async(key,value)=>value===undefined?settings.delete(key):settings.set(key,value)})},window:{showQuickPick:async items=>options.selectCancel ? undefined : options.jdbcOnly ? items.filter(item=>item.connection.channel!=='dms') : items,showWarningMessage:async(text,_options,action)=>{notices.push(text);return options.cancel?undefined:action;}},extensions:{getExtension:id=>id===LEGACY_ID ? {packageJSON:{sqlquayMigrationHelper:options.helper!==false},activate:async()=>({migrationVersion:2,migrate:(token,options)=>sendLegacy(source,vscode,token,options)})} : id===PUBLIC_ID ? {isActive:true,exports:{importLegacyData:(...args)=>bridge.receive(...args)}} : undefined}};
   const bridge=importer(destination,vscode,()=>{},value=>busy.push(value));
   return {source,destination,settings,busy,notices,bridge,vscode,jdbc,dms};
 }
@@ -62,8 +62,47 @@ test('storage failure rolls back the new installation and leaves the source inta
  assert.equal(x.destination.globalState.values.size,0);assert.equal(x.destination.workspaceState.values.size,0);assert.equal(x.destination.secrets.values.size,0);assert.equal(x.settings.size,0);
  assert.equal(x.source.globalState.get('connections').length,2);assert.equal(x.source.secrets.values.size,1);assert.deepEqual(x.busy,[true,false]);
 });
-test('migration refuses unsolicited payloads, a populated target and a full legacy extension',async()=>{
+test('migration refuses unsolicited payloads and a full legacy extension',async()=>{
  const x=setup();await assert.rejects(x.bridge.receive({},'unrequested'),/command palette/);
- const populated=setup({global:[['connections',[{id:'keep'}]]]});await assert.rejects(populated.bridge.start(),/already has connections/);assert.equal(populated.source.secrets.reads,0);
  const legacy=setup({helper:false});await assert.rejects(legacy.bridge.start(),/helper VSIX/);assert.equal(legacy.source.secrets.reads,0);
+});
+
+test('selected JDBC imports alongside the existing DMS without changing it or its default binding',async()=>{
+ const keep={id:'keep-dms',revision:'keep-r1',channel:'dms',name:'Current DMS',keyword:'sandbox',database:'sandbox',databaseId:'42'};
+ const binding={id:keep.id,revision:keep.revision};
+ const x=setup({jdbcOnly:true,global:[['connections',[keep]],['dmsPending',true]],workspace:[['ddlConnection:workspaceDefault',binding]]});
+ const before=JSON.stringify(keep);
+ const result=await x.bridge.start();
+ assert.deepEqual(result,{connections:1,credentials:1,bindings:2});
+ assert.equal(JSON.stringify(x.destination.globalState.get('connections')[0]),before);
+ assert.deepEqual(x.destination.workspaceState.get('ddlConnection:workspaceDefault'),binding);
+ assert.equal(x.destination.globalState.get('connections').length,2);
+ assert.equal(x.destination.globalState.get('dmsPending'),true);
+ assert.equal(x.source.secrets.reads,1);
+ assert.deepEqual(await x.bridge.start(),{cancelled:true});
+});
+
+test('selection cancellation reads no credentials and preserves the populated target',async()=>{
+ const keep={id:'keep'};const x=setup({selectCancel:true,global:[['connections',[keep]]]});
+ assert.deepEqual(await x.bridge.start(),{cancelled:true});assert.equal(x.source.secrets.reads,0);
+ assert.deepEqual(x.destination.globalState.get('connections'),[keep]);assert.equal(x.destination.workspaceState.values.size,0);
+});
+test('merge rollback retains current connections, credentials and pending locks',async()=>{
+ const keep={id:'keep'};const x=setup({global:[['connections',[keep]],['dmsPending',true]],secrets:[['jdbc:keep','fixture']]});
+ const before=[...x.destination.globalState.values];
+ x.destination.workspaceState.update=async()=>{throw Error('fixture storage failure');};
+ await assert.rejects(x.bridge.start(),/rollback were incomplete|rolled back/);
+ assert.deepEqual([...x.destination.globalState.values],before);assert.deepEqual([...x.destination.secrets.values],[['jdbc:keep','fixture']]);
+});
+test('an orphan destination credential is not overwritten',async()=>{
+ const x=setup({secrets:[['jdbc:jdbc-1','fixture']]});await assert.rejects(x.bridge.start(),/credential would be overwritten/);
+ assert.equal(x.destination.globalState.values.size,0);assert.equal(x.destination.secrets.values.get('jdbc:jdbc-1'),'fixture');
+});
+
+test('a later selection can append the remaining source connection without rereading imported credentials',async()=>{
+ const options={jdbcOnly:true};const x=setup(options);
+ assert.equal((await x.bridge.start()).connections,1);const reads=x.source.secrets.reads;
+ options.jdbcOnly=false;assert.equal((await x.bridge.start()).connections,1);
+ assert.equal(x.source.secrets.reads,reads);assert.equal(x.destination.globalState.get('connections').length,2);
+ assert.deepEqual(await x.bridge.start(),{alreadyImported:true});
 });

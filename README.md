@@ -14,7 +14,7 @@
 
 ## 先用离线 Demo 跑通
 
-1. 在 VS Code 的扩展视图选择 **Install from VSIX…**，打开 `artifacts/sqlquay-0.5.0.vsix`。
+1. 在 VS Code 的扩展视图选择 **Install from VSIX…**，打开 `artifacts/sqlquay-0.5.1.vsix`。
 2. 打开活动栏 **SQLQuay** → **Local Demo**，点击右侧 **New Query**。
 3. 按 `Cmd/Ctrl+Enter`，或点击 SQL 编辑器右上的 ▶。每次运行在旁边打开独立的 **Query Result #编号**，不会覆盖原结果。结果页改 SQL 后重新运行也会新开结果。
 4. 对象树的 **sandbox → Tables → products** 可查看字段。Demo 是进程内固定数据，只识别 `SELECT 1 AS probe` 及从 `products` 读取显式列的简单查询（可加 `WHERE id = …` 和 `LIMIT`）；不联网、不访问真实数据库。
@@ -29,9 +29,15 @@
 
 ## 用 DMS 读已核实的库
 
-在 **Database → + → DMS** 填写 **Search keyword**（DMS 搜索关键词）、**Schema**（精确库名）、**Database ID**（已核实的 DMS 数字 ID）。**Save** 只保存，**Connect** 先通过 DMS 读取表清单再保存。打开 **New Query** 后可先运行预填的 `SELECT 1 AS probe;`。对象树和结果标题会标明 JDBC 或 DMS。
+先在本机安装阿里云官方 CLI 和 `aliyun-cli-dms-enterprise` 插件，并配置一个有 DMS 权限的命名 profile。已有 profile 可以直接使用，不必创建 `dms-prod`。
 
-DMS 使用本机已安装的 `aliyun-cli-dms-enterprise` 和扩展附带的 `policy/execute_safe.py`。封装器固定使用 `dms-prod`，并且只解析 `product` 环境；测试库继续使用 JDBC。DMS 不需要数据库密码或 Java，也不自动安装或更新 CLI 插件。若封装器安装在非默认路径，用机器设置 `dbWorkbench.dmsWrapperPath` 指向扩展附带的 `policy/execute_safe.py`。SQL 通过同一封装器检查目标、有界条件、索引、EXPLAIN 和扫描上限。
+在 **Database → + → DMS** 选择 **CLI profile**。插件只通过 `aliyun configure list` 读取 profile 名称、区域和认证状态；不会读取配置文件中的 AccessKey。**Region** 默认取所选 profile 的区域，可改为目标 DMS 服务区域。
+
+没有 profile 时，点 **Configure CLI authentication…**，在打开的本机终端中把示例 `my-dms` 换成自己的名称，再自行执行认证；插件只预填命令，不自动执行或接收凭据。完成后点 **Refresh profiles**。
+
+填写 **Search keyword**（DMS 搜索关键词）、**Schema**（精确库名）、**Database ID**（已核实的 DMS 数字 ID）。**Save** 只保存；**Connect** 读取表清单后保存。打开 **New Query** 可先运行 `SELECT 1 AS probe;`。
+
+DMS 使用所选 profile 和 region 调用本机 CLI 与附带的 `policy/execute_safe.py`，核对 `product` 环境和精确 Database ID。当前测试库继续使用 JDBC。DMS 不需要数据库密码或 Java，也不自动安装、更新插件或切换 CLI 默认 profile。旧版未保存认证选项的连接继续使用 `dms-prod` / `cn-hangzhou`；已有组织批准的 `dbWorkbench.dmsWrapperPath` 保留。普通查询、DDL 和数据预览使用同一连接身份，继续保留有界条件、索引、EXPLAIN、扫描阈值、单查询锁及超时不重试。
 
 ## 直接执行已有 SQL 文件
 
@@ -39,7 +45,7 @@ DMS 使用本机已安装的 `aliyun-cli-dms-enterprise` 和扩展附带的 `pol
 
 执行连接按文件保存在工作区状态，重开该文件仍可使用；不改 SQL 内容。状态栏始终显示当前文件的连接、库和通道。已明确选择的执行连接也用于该文件的悬停和预览。原有单文件预览选择和工作区默认预览连接仍只负责预览，不会自动成为执行连接。
 
-只改连接名称、分组或 DMS 搜索关键词，不会让原绑定失效。修改库、地址、端口、DMS Database ID、TLS 或认证后，仍须重新选择连接；不自动换库或重跑。
+只改连接名称、分组或 DMS 搜索关键词，不会让原绑定失效。修改库、地址、端口、DMS Database ID、CLI profile/region、TLS 或认证后，仍须重新选择连接；不自动换库或重跑。
 
 ## 多结果、固定与会话历史
 

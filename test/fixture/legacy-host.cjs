@@ -9,6 +9,6 @@ exports.activate=async context=>{
  await context.workspaceState.update('sqlConnection:file:///fixture/existing.sql',{id:'native-jdbc',revision:'native-r1'});
  await context.workspaceState.update('ddlConnection:workspaceDefault',{id:'native-dms',revision:'native-r2'});
  await context.secrets.store('jdbc:native-jdbc',JSON.stringify({user:'reader',password:'fixture'}));
- const api={extensions:vscode.extensions,window:{showWarningMessage:async(_message,_options,action)=>action}};
- return {migrate:token=>sendLegacy(context,api,token),testContext:()=>context};
+ const api={extensions:vscode.extensions,window:{showQuickPick:async items=>items.filter(item=>item.connection.channel!=='dms'),showWarningMessage:async(_message,_options,action)=>action}};
+ return {migrationVersion:2,migrate:(token,options)=>sendLegacy(context,api,token,options),testContext:()=>context};
 };

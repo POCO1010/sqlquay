@@ -6,6 +6,7 @@ const {expand} = require('./jdbc.cjs');
 const {dmsReadonly} = require('./query.cjs');
 
 class DmsStopped extends Error {}
+const profileName=value=>typeof value==='string' && value.length>0 && value.length<=128 && !/^[\s-]|[\x00-\x1f\x7f]/.test(value);
 function dmsConfig(input) {
   const get = key => typeof input[key] === 'string' ? input[key].trim() : '';
   const name = get('name'), group = get('group'), keyword = get('keyword'), database = get('database'), databaseId = get('databaseId');
@@ -14,7 +15,9 @@ function dmsConfig(input) {
       /[\x00-\x1f]/.test(keyword + database) || !/^[1-9][0-9]{0,19}$/.test(databaseId)) {
     throw Error('Enter the DMS search keyword, exact schema, and verified numeric Database ID.');
   }
-  return {channel:'dms',name,group,keyword,database,databaseId};
+  const profile=get('profile') || 'dms-prod', region=get('region') || 'cn-hangzhou';
+  if (!profileName(profile) || !/^[a-z]{2}-[a-z0-9-]{1,40}$/.test(region)) throw Error('Choose a valid Aliyun CLI profile and region.');
+  return {channel:'dms',name,group,keyword,database,databaseId,profile,region};
 }
 
 function call(command, args) {
@@ -31,6 +34,23 @@ function call(command, args) {
     child.once('close',code=>resolve({code,stdout:Buffer.concat(buffers.stdout).toString(),
       stderr:Buffer.concat(buffers.stderr).toString(),stdoutOverflow:sizes.stdout>cap,stderrOverflow:sizes.stderr>cap}));
   });
+}
+
+function parseProfiles(output) {
+  return output.split(/\r?\n/).flatMap(line=>{
+    const cells=line.split('|').map(value=>value.trim());
+    if(cells.length!==5) return [];
+    const name=cells[0].replace(/\s+\*$/,'').trim();
+    if(!profileName(name) || !/^[a-z]{2}-[a-z0-9-]{1,40}$/.test(cells[3])) return [];
+    return [{name,region:cells[3],valid:cells[2]==='Valid'}];
+  });
+}
+async function listDmsProfiles(transport=call) {
+  let result;
+  try { result=await transport('aliyun',['configure','list']); }
+  catch { throw Error('Aliyun CLI was not found. Install the official CLI, then configure a named profile in your terminal.'); }
+  if(result.code!==0 || result.stdoutOverflow) throw Error('Could not list Aliyun CLI profiles. Run aliyun configure list in your terminal.');
+  return parseProfiles(result.stdout);
 }
 
 const object = x => x !== null && typeof x === 'object' && !Array.isArray(x);
@@ -77,9 +97,9 @@ function makeDms(settings, transport = call) {
     }
     let response;
     try {
-      // The approved entrypoint fixes --profile dms-prod and owns target resolution, the
+      // The approved entrypoint uses the bound profile and owns target resolution, the
       // workstation lock, scan limits, timeouts, and the CLI AI Mode lifecycle.
-      const targetArgs=['--database-keyword='+target.keyword,'--schema='+target.database,'--db-id='+target.databaseId];
+      const targetArgs=['--database-keyword='+target.keyword,'--schema='+target.database,'--db-id='+target.databaseId,'--profile='+target.profile,'--region='+target.region];
       const args=table === undefined ? ['-I','-B',path.join(__dirname,'..','scripts','dms_timed.py'),wrapper,...targetArgs,'--sql='+statement] :
         ['-I','-B',path.join(__dirname,'..','scripts','preview_safe.py'),...targetArgs,'--safe-wrapper='+wrapper,'--table='+table];
       response = await transport(expand(settings.python),args);
@@ -116,4 +136,4 @@ function makeDms(settings, transport = call) {
     return {...grid(out.rows,statement,limit,table === undefined ? undefined : out.columns),...(timings ? {timings} : {})};
   };
 }
-module.exports = {dmsConfig, makeDms, DmsStopped};
+module.exports = {dmsConfig, makeDms, DmsStopped, listDmsProfiles, parseProfiles};

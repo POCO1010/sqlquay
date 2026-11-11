@@ -3,7 +3,7 @@ const vscode = require('vscode');
 const {randomUUID} = require('node:crypto');
 const {DEMO,demoQuery,pickSql,readonly,quoteTable} = require('./query.cjs');
 const {makeJdbc,UnknownState,connectionConfig} = require('./jdbc.cjs');
-const {makeDms,DmsStopped,dmsConfig} = require('./dms.cjs');
+const {makeDms,DmsStopped,dmsConfig,listDmsProfiles} = require('./dms.cjs');
 const {relationAt,tableDdl} = require('./ddl.cjs');
 const {languages,regionAt,selectedSql} = require('./embedded.cjs');
 const {suggestions,ddlColumns} = require('./completion.cjs');
@@ -16,7 +16,7 @@ const path=require('node:path');
 const channelOf = c => c.engine === 'demo' ? 'demo' : c.channel === 'dms' ? 'dms' : 'jdbc';
 const channelLabel = c => channelOf(c) === 'demo' ? 'offline'
   : channelOf(c) === 'jdbc' && c.sslMode === 'DISABLED' ? 'JDBC · Unencrypted' : channelOf(c).toUpperCase();
-const targetSignature = c => JSON.stringify([channelOf(c),c.engine,c.host,c.port,c.database,c.databaseId,c.sslMode??'VERIFY_IDENTITY']);
+const targetSignature = c => JSON.stringify([channelOf(c),c.engine,c.host,c.port,c.database,c.databaseId,c.sslMode??'VERIFY_IDENTITY',...(channelOf(c)==='dms' ? [c.profile??'dms-prod',c.region??'cn-hangzhou'] : [])]);
 
 function activate(context) {
   const {window,workspace,commands,TreeItem,TreeItemCollapsibleState: State,ThemeIcon,Uri} = vscode;
@@ -404,6 +404,18 @@ function activate(context) {
     const receive = panel.webview.onDidReceiveMessage(async message => {
       if (!message || typeof message !== 'object') return;
       if (message.type==='close' && !busy) { panel.dispose();return; }
+      if (message.type==='loadDmsProfiles') {
+        if(!workspace.isTrusted) return;
+        try { await panel.webview.postMessage({type:'dmsProfiles',profiles:await listDmsProfiles()}); }
+        catch(error) { await panel.webview.postMessage({type:'dmsProfiles',profiles:[],message:error.message}); }
+        return;
+      }
+      if (message.type==='configureDms') {
+        if(!workspace.isTrusted) return;
+        const terminal=window.createTerminal({name:'SQLQuay · Aliyun CLI setup'});
+        terminal.show();terminal.sendText('aliyun configure --profile my-dms',false);
+        return;
+      }
       if (message.type==='ready') { if(edit) await panel.webview.postMessage({type:'configure',connection:{...edit,channel:channelOf(edit)}});return; }
       if (busy || !['save','connect'].includes(message.type) || !message.values || typeof message.values!=='object') return;
       busy=true;
@@ -574,7 +586,7 @@ function activate(context) {
     if(online || running) throw Error('Wait for the active query to finish.');
     const result=await migration.start();
     if(result?.alreadyImported) window.setStatusBarMessage('当前工作区已导入旧版配置。',4000);
-    else if(result && !result.cancelled) window.setStatusBarMessage(`已导入 ${result.connections} 个连接、${result.bindings} 个当前工作区绑定；旧数据保留。`,6000);
+    else if(result && !result.cancelled) window.setStatusBarMessage(`已导入 ${result.connections} 个连接、${result.credentials} 套 JDBC 凭据、${result.bindings} 个当前工作区绑定；旧数据保留。`,6000);
     return result;
   });
   setEditorContext();

@@ -5,13 +5,14 @@ test('new DMS form, existing JDBC connection, shared result panel and cross-chan
   const jdbc={id:'legacy',revision:'v1',name:'Existing JDBC',group:'',engine:'mysql',host:'fixture.invalid',port:3306,database:'sandbox'};
   const state=new Map([['connections',[jdbc]]]), calls=[], panels=[], commands=new Map(), errors=[];
   let tree, hoverProvider, completionProvider, stopped=false, secretReads=0, allowPlaintext=false, blocker;
-  const copied=[],deleted=[];
+  const copied=[],deleted=[],terminals=[];
   const status={show(){this.visible=true;},hide(){this.visible=false;},dispose(){}}, stored=[];
   const documents=[], previewBindings=new Map();
   let pickedId, pickItems, duringPick, pickHistoryId, revealed;
   const grid=(label,rows)=>({columns:label.map(name=>({name,type:''})),rows,truncated:false});
   const dispose=()=>({dispose(){}});
   const window={
+    createTerminal(options){const terminal={options,show(){this.shown=true;},sendText(text,execute){this.text=text;this.execute=execute;}};terminals.push(terminal);return terminal;},
     createTreeView(_,options){tree=options.treeDataProvider;return {...dispose(),reveal:async node=>{revealed=node;}};},
     createStatusBarItem:()=>status,
     onDidChangeActiveTextEditor:dispose,
@@ -52,7 +53,7 @@ test('new DMS form, existing JDBC connection, shared result panel and cross-chan
           if(sql.startsWith('SHOW CREATE TABLE')) return grid(['Table','Create Table'],[['products','CREATE TABLE products (jdbc INT)']]);
           return grid(['probe'],[['jdbc']]);
         }};
-        if(request==='./dms.cjs') return {...load.apply(this,arguments),makeDms:()=>async(connection,sql,limit,table)=>{
+        if(request==='./dms.cjs') return {...load.apply(this,arguments),listDmsProfiles:async()=>[{name:'team-fixture',region:'cn-beijing',valid:true}],makeDms:()=>async(connection,sql,limit,table)=>{
           if (table) { calls.push(['preview','dms',connection.id,table,limit]);return grid(['id'],[['2']]); }
           calls.push(['dms',connection.id,sql]);
           if(stopped) throw new DmsStopped('DMS fixture stopped.');
@@ -78,6 +79,8 @@ test('new DMS form, existing JDBC connection, shared result panel and cross-chan
   const jdbcEditor=window.activeTextEditor;
   await run('connect');
   const form=panels.at(-1);
+  await form.receive({type:'loadDmsProfiles'});assert.equal(form.messages.at(-1).profiles[0].name,'team-fixture');
+  await form.receive({type:'configureDms'});assert.equal(terminals[0].text,'aliyun configure --profile my-dms');assert.equal(terminals[0].execute,false);assert.equal(secretReads,0);
   await form.receive({type:'connect',values:{channel:'dms',name:'DMS fixture',keyword:'sandbox',database:'sandbox',databaseId:'42'}});
   const dmsNode=tree.getChildren().find(x=>x.connection?.channel==='dms');
   assert.equal(tree.getTreeItem(dmsNode).description,'DMS');

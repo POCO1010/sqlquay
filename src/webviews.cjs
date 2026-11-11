@@ -37,13 +37,17 @@ function connectHtml(assets) {
 <p id="tls-warning" class="hint tls-warning" hidden>No TLS: the server is not verified and SQL and results travel unencrypted.</p>
 </fieldset>
 <fieldset id="dms-fields" hidden disabled>
-<div class="config-tabs"><span>Config</span><span class="tab active">Main</span><span class="subdued">Read-only · dms-prod</span></div>
+<div class="config-tabs"><span>Config</span><span class="tab active">Main</span><span class="subdued">Read-only · Aliyun CLI</span></div>
 <div class="fields">
+<label>CLI profile <select required name="profile" aria-label="Aliyun CLI profile"><option value="">Choose a configured profile</option></select></label>
+<label>Region <input required name="region" aria-label="DMS region" maxlength="43" placeholder="cn-hangzhou"></label>
 <label>Search keyword <input required name="keyword" maxlength="128" placeholder="Keyword used in DMS"></label>
 <label>Schema <input required name="schema" maxlength="128" placeholder="Exact schema name"></label>
 <label>Database ID <input required name="databaseId" inputmode="numeric" pattern="[1-9][0-9]{0,19}" maxlength="20" placeholder="Verified DMS ID"></label>
 </div>
-<p class="subdued hint">Use a verified product-environment target. This connection uses the local DMS CLI profile and needs no database password.</p>
+<p id="dms-auth-status" class="subdued hint" role="status">Choose the named Aliyun CLI profile that can access this DMS database.</p>
+<div class="form-actions"><button type="button" id="dms-profiles" class="secondary">Refresh profiles</button><button type="button" id="dms-auth" class="plain">Configure CLI authentication…</button></div>
+<p class="subdued hint">DMS authentication stays in Aliyun CLI; SQLQuay does not store its AccessKeys. Production databases only. Configure a named profile in the terminal, then refresh this list.</p>
 </fieldset>
 <div class="form-actions"><button type="submit" name="action" value="save" class="secondary">Save</button><button type="submit" name="action" value="connect">＋ Connect</button><button type="button" id="close" class="plain">× Close</button></div>
 <p id="feedback" role="status"></p>

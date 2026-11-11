@@ -1,5 +1,10 @@
 # Changelog
 
+## 0.5.1
+
+- DMS 支持选择本机已有的 CLI profile 和 region，提供本机认证指引；不收集 AccessKey、不自动执行认证或切换默认 profile。旧连接保留原身份。
+- 旧版迁移支持选择并追加缺少的连接，不再要求新版连接清单为空；已有 DMS、凭据、绑定和查询锁保留。
+
 ## 0.5.0
 
 - 首个 Marketplace 发行身份：TomMajor.sqlquay；MIT 许可，新增 PNG 品牌图标。

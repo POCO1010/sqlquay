@@ -94,6 +94,8 @@ def main():
     parser = argparse.ArgumentParser(description=__doc__)
     for option in ("safe-wrapper", "database-keyword", "schema", "db-id", "table"):
         parser.add_argument("--" + option, required=True)
+    parser.add_argument("--profile", default="dms-prod")
+    parser.add_argument("--region", default="cn-hangzhou")
     args = parser.parse_args()
     wrapper = Path(args.safe_wrapper).resolve()
     if wrapper.name != "execute_safe.py" or not wrapper.is_file():
@@ -113,7 +115,7 @@ def main():
         quote(args.schema)
         quote(args.table)
         with guard.single_query_lock():
-            executor = safe.SafeDmsExecutor(profile="dms-prod", timeout=10)
+            executor = safe.SafeDmsExecutor(profile=args.profile, region=args.region, timeout=10)
             try:
                 executor.enable_ai_mode()
                 target = executor.resolve_database(args.database_keyword, schema=args.schema, database_id=args.db_id)

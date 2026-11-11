@@ -14,13 +14,14 @@ async function main() {
 const fs=require('node:fs'),assert=require('node:assert/strict'),args=process.argv.slice(2);
 fs.appendFileSync(${JSON.stringify(log)},JSON.stringify(args)+'\\n');
 if(args.join(' ')==='plugin list'){console.log('aliyun-cli-dms-enterprise 0.7.8');return;}
-assert.equal(args[args.indexOf('--profile')+1],'dms-prod');
+const profile=args[args.indexOf('--profile')+1];assert.ok(['dms-prod','team-fixture'].includes(profile));
 if(args[0]==='configure'){
   assert.equal(args[1],'ai-mode');
   assert.ok(['enable','set-user-agent','disable'].includes(args[2]));
   return;
 }
 assert.equal(args[0],'dms-enterprise');
+assert.equal(args[args.indexOf('--region')+1],profile==='team-fixture'?'cn-beijing':'cn-hangzhou');
 if(args[1]==='search-database'){
   console.log(JSON.stringify({SearchDatabaseList:{SearchDatabase:[
     {SchemaName:'sandbox',EnvType:'product',DatabaseId:42,DbType:'mysql'},
@@ -92,13 +93,19 @@ console.log(JSON.stringify({Results:[{Success:true,Rows:rows}]}));
     assert.equal((await query(warehouse,undefined,100,'products')).rows.length,100);
     await assert.rejects(query(warehouse,undefined,100,'unknown'),/扫描上限/);
     await assert.rejects(query(warehouse,undefined,100,'preview_timeout'),DmsStopped);
+    const custom={...target,profile:'team-fixture',region:'cn-beijing'};
+    assert.deepEqual((await query(custom,'SELECT 1 AS probe')).rows,[['1']]);
+    assert.equal((await query(custom,undefined,100,'products')).rows.length,100);
     const calls=fs.readFileSync(log,'utf8').trim().split('\n').map(JSON.parse);
-    assert.equal(calls.filter(a=>a[0]==='plugin').length,14);
-    assert.equal(calls.filter(a=>a[0]==='configure'&&a[2]==='disable').length,13);
+    assert.equal(calls.filter(a=>a[0]==='plugin').length,16);
+    assert.equal(calls.filter(a=>a[0]==='configure'&&a[2]==='disable').length,15);
     assert.equal(calls.filter(a=>a.includes('SELECT 1 AS timeout_probe')).length,1);
     assert.equal(calls.some(a=>a.includes('SELECT id FROM products WHERE id=1 LIMIT 1')),false);
     assert.equal(calls.filter(a=>a.some(v=>v.startsWith('SELECT /*+') && v.includes('preview_timeout'))).length,1);
-    assert.equal(calls.filter(a=>a.some(v=>v.startsWith('SELECT /*+'))).length,3);
+    assert.equal(calls.filter(a=>a.some(v=>v.startsWith('SELECT /*+'))).length,4);
+    const customCalls=calls.filter(a=>a.includes('team-fixture'));assert.ok(customCalls.length>5);
+    assert.ok(customCalls.some(a=>a.some(v=>v.startsWith('SELECT /*+'))));
+    assert.equal(calls.some(a=>a[0]==='configure' && a[1]!=='ai-mode'),false);
     console.log('DBW_DMS_WRAPPER_FIXTURE_PASS');
   } finally {
     process.env.PATH=oldPath;

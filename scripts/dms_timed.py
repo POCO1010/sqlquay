@@ -1,11 +1,12 @@
 """Measure the approved DMS executor without changing its query policy or lifecycle."""
+import argparse
 import json
 from pathlib import Path
 import sys
 import time
 
 
-def instrument(safe, expected=None):
+def instrument(safe, expected=None, *, profile=None, region=None):
     timings = {"connect": 0, "preflight": 0, "execute": 0}
     original = safe.SafeDmsExecutor
 
@@ -17,6 +18,13 @@ def instrument(safe, expected=None):
             timings[phase] += (time.perf_counter() - start) * 1000
 
     class TimedExecutor(original):
+        def __init__(self, **kwargs):
+            if profile is not None:
+                kwargs["profile"] = profile
+            if region is not None:
+                kwargs["region"] = region
+            super().__init__(**kwargs)
+
         def enable_ai_mode(self):
             return measure("connect", super().enable_ai_mode)
 
@@ -38,12 +46,17 @@ def report(timings):
 
 def main():
     wrapper = Path(sys.argv.pop(1)).expanduser().resolve()
+    parser = argparse.ArgumentParser(add_help=False)
+    parser.add_argument("--profile", default="dms-prod")
+    parser.add_argument("--region", default="cn-hangzhou")
+    settings, remaining = parser.parse_known_args(sys.argv[1:])
+    sys.argv[1:] = remaining
     if wrapper.name != "execute_safe.py" or not wrapper.is_file():
         raise ValueError("An installed execute_safe.py is required")
     sys.path.insert(0, str(wrapper.parent))
     import execute_safe as safe
     sql = next(arg.split("=", 1)[1] for arg in sys.argv if arg.startswith("--sql="))
-    timings = instrument(safe, sql.strip().rstrip(";"))
+    timings = instrument(safe, sql.strip().rstrip(";"), profile=settings.profile, region=settings.region)
     try:
         return safe.main()
     finally:

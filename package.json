@@ -6,7 +6,7 @@
   "repository": {"type":"git","url":"https://github.com/POCO1010/sqlquay.git"},
   "homepage": "https://github.com/POCO1010/sqlquay#readme",
   "bugs": {"url":"https://github.com/POCO1010/sqlquay/issues"},
-  "version": "0.5.0",
+  "version": "0.5.1",
   "publisher": "TomMajor",
   "license": "MIT",
   "engines": {"vscode": "^1.96.0"},
@@ -67,7 +67,7 @@
         "dbWorkbench.driverJar":{"type":"string","default":"","scope":"machine","description":"Absolute path to a trusted MySQL Connector/J 8.0.12+ JAR."},
         "dbWorkbench.javaPath":{"type":"string","default":"java","scope":"machine","description":"Java 8+ executable."},
         "dbWorkbench.pythonPath":{"type":"string","default":"python3","scope":"machine","description":"Python 3 executable for the shared read-only query guard."},
-        "dbWorkbench.dmsWrapperPath":{"type":"string","default":"","scope":"machine","description":"Optional approved execute_safe.py override. Empty uses the bundled wrapper with profile dms-prod."},
+        "dbWorkbench.dmsWrapperPath":{"type":"string","default":"","scope":"machine","description":"Optional approved execute_safe.py override. Empty uses the bundled wrapper with the connection-selected CLI profile."},
         "dbWorkbench.guardPath":{"type":"string","default":"","scope":"machine","description":"Optional approved query_guard.py override. Empty uses the bundled read-only policy."}
       }
     }

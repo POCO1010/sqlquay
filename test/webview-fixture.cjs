@@ -45,12 +45,16 @@ async function main(){
    assert.equal((await form.evaluate(()=>window.sent.at(-1))).values.sslMode,'DISABLED');
    assert.equal(await form.getByLabel('Password').inputValue(),'');
    await dispatch(form,{type:'error',message:'Check test credentials.'});
-   assert.equal(await form.getByRole('status').textContent(),'Check test credentials.');
+   assert.equal(await form.locator('#feedback').textContent(),'Check test credentials.');
    await form.getByRole('button',{name:'Save',exact:true}).click();
    assert.equal((await form.evaluate(()=>window.sent.at(-1))).type,'save');
    const dms=await create(browser,connectHtml(assets),520,true);
    await dms.getByRole('radio',{name:'DMS',exact:true}).check();
    assert.equal(await dms.getByLabel('Username').isVisible(),false);
+   assert.equal((await dms.evaluate(()=>window.sent.at(-1))).type,'loadDmsProfiles');
+   await dispatch(dms,{type:'dmsProfiles',profiles:[{name:'team-fixture',region:'cn-beijing',valid:true}]});
+   await dms.getByRole('combobox',{name:'Aliyun CLI profile'}).selectOption('team-fixture');
+   assert.equal(await dms.getByRole('textbox',{name:'DMS region'}).inputValue(),'cn-beijing');
    assert.equal(await dms.evaluate(()=>document.documentElement.scrollWidth),520);
    if (output) await dms.screenshot({path:path.join(output,'connect-dms.png')});
    for(const [name,value] of Object.entries({Name:'DMS fixture','Search keyword':'fixture',Schema:'fixture','Database ID':'42'})) {
@@ -58,10 +62,10 @@ async function main(){
    }
    await dms.getByRole('button',{name:'Connect'}).click();
    assert.deepEqual((await dms.evaluate(()=>window.sent.at(-1))).values,{
-     channel:'dms',name:'DMS fixture',group:'',keyword:'fixture',database:'fixture',databaseId:'42'
+     channel:'dms',profile:'team-fixture',region:'cn-beijing',name:'DMS fixture',group:'',keyword:'fixture',database:'fixture',databaseId:'42'
    });
    await dispatch(dms,{type:'error',message:'Target not found.'});
-   assert.equal(await dms.getByRole('status').textContent(),'Target not found.');
+   assert.equal(await dms.locator('#feedback').textContent(),'Target not found.');
    await dispatch(dms,{type:'configure',connection:{channel:'dms',name:'Saved DMS',database:'saved_schema',keyword:'saved',databaseId:'7'}});
    assert.equal(await dms.getByRole('radio',{name:'JDBC',exact:true}).isDisabled(),true);
    assert.equal(await dms.getByLabel('Schema').inputValue(),'saved_schema');
