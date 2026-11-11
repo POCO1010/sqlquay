@@ -15,6 +15,8 @@
 
 需要 Node.js 22+、JDK 8+ 和 Python 3.10+，在线策略目前支持 macOS / Linux。
 
+市场 PNG 图标的宽、高均须在 128–1024 像素之间。当前图标等比缩放为 512 × 512；打包时先检查尺寸，超限直接报错。
+
 ```sh
 npm ci --ignore-scripts
 npm test

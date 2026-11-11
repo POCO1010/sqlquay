@@ -20,3 +20,12 @@ test('public content checks flag private data without repeating its value',()=>{
   }
   assert.deepEqual(issues('password="fixture"\nhttps://github.com/POCO1010/sqlquay'),[]);
 });
+
+test('Marketplace packaging checks PNG dimensions before uploading',()=>{
+  const {validateIcon}=require('../scripts/package.cjs');
+  const png=size=>{const b=Buffer.alloc(24);Buffer.from('89504e470d0a1a0a','hex').copy(b);b.writeUInt32BE(size,16);b.writeUInt32BE(size,20);return b;};
+  for(const size of [128,512,1024]) assert.deepEqual(validateIcon(png(size)),{width:size,height:size});
+  for(const size of [127,1025,1254]) assert.throws(()=>validateIcon(png(size)),/128 and 1024/);
+  assert.throws(()=>validateIcon(Buffer.from('not a PNG')),/PNG/);
+  assert.deepEqual(validateIcon(require('node:fs').readFileSync(require('node:path').join(__dirname,'..',manifest.icon))),{width:512,height:512});
+});
