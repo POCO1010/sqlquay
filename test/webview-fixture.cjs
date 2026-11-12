@@ -48,6 +48,21 @@ async function main(){
    assert.equal(await form.locator('#feedback').textContent(),'Check test credentials.');
    await form.getByRole('button',{name:'Save',exact:true}).click();
    assert.equal((await form.evaluate(()=>window.sent.at(-1))).type,'save');
+   const ak=await create(browser,connectHtml(assets));
+   await ak.getByRole('radio',{name:'DMS',exact:true}).check();
+   assert.equal(await ak.locator('.config-tabs').count(),0);
+   const database=ak.getByRole('combobox',{name:'Database',exact:true});
+   await database.fill('sand');await database.press('Enter');
+   assert.equal((await ak.evaluate(()=>window.sent.at(-1))).values.keyword,'sand');
+   await dispatch(ak,{type:'dmsDatabases',databases:[{database:'sandbox',databaseId:'42',label:'sandbox · Demo · #42'}]});
+   await database.press('ArrowDown');await ak.getByRole('listbox',{name:'Matching databases'}).press('Enter');
+   assert.equal(await database.inputValue(),'sandbox');
+   await ak.getByRole('button',{name:'Save',exact:true}).click();
+   const selected=(await ak.evaluate(()=>window.sent.at(-1))).values;
+   assert.equal(selected.keyword,'sand');assert.equal(selected.database,'sandbox');assert.equal(selected.databaseId,'42');
+   await dispatch(ak,{type:'error',message:'Offline'});await database.fill('different');
+   const attempts=await ak.evaluate(()=>window.sent.length);await ak.getByRole('button',{name:'Save',exact:true}).click();
+   assert.equal(await ak.evaluate(()=>window.sent.length),attempts);
    const dms=await create(browser,connectHtml(assets),520,true);
    await dms.getByRole('radio',{name:'DMS',exact:true}).check();
    assert.equal(await dms.getByLabel('Username').isVisible(),false);
@@ -58,7 +73,7 @@ async function main(){
    assert.equal(await dms.getByRole('textbox',{name:'DMS region'}).inputValue(),'cn-beijing');
    assert.equal(await dms.evaluate(()=>document.documentElement.scrollWidth),520);
    if (output) await dms.screenshot({path:path.join(output,'connect-dms.png')});
-   for(const [name,value] of Object.entries({Name:'DMS fixture','Search keyword':'fixture',Schema:'fixture','Database ID':'42'})) {
+   for(const [name,value] of Object.entries({Name:'DMS fixture',Schema:'fixture','Database ID':'42'})) {
      await dms.getByLabel(name,{exact:true}).fill(value);
    }
    await dms.getByRole('button',{name:'Connect'}).click();

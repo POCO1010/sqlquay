@@ -12,7 +12,7 @@ ${body.replaceAll('{{icon}}', esc(icon))}<script nonce="${nonce}" src="${esc(i18
 function connectHtml(assets) {
   const tr=translator(assets.language), h=value=>esc(tr(value));
   return document({...assets,kind:'connect'}, `<main class="connect">
-<header class="connect-heading"><img src="{{icon}}" width="42" height="42" alt=""><h1 id="heading">${h("Connect to server")}</h1></header>
+<header class="connect-heading"><img src="{{icon}}" width="42" height="42" alt=""><h1 id="heading">${h("Connect to server")}</h1><span class="connection-status subdued">${h("Read-only")}</span></header>
 <form id="connection">
 <div class="name-line"><label>${h("Name")} <input required name="name" maxlength="80" placeholder="${h("Connection name")}"></label><label>${h("Group")} <input name="group" maxlength="80" placeholder="${h("Optional")}"></label><span class="scope">${h("Scope")} <strong>${h("Global")}</strong></span></div>
 <fieldset id="methods" class="engines">
@@ -24,7 +24,6 @@ function connectHtml(assets) {
 </fieldset>
 <fieldset id="jdbc-fields">
 <section class="engines dialects"><p>${h("Server Type")}</p><div role="group" aria-label="${h("Server type")}"><label class="engine"><input type="radio" name="engine" value="mysql" checked> MySQL</label><label class="engine"><input type="radio" name="engine" value="doris"> Apache Doris / SelectDB</label></div></section>
-<div class="config-tabs"><span>${h("Config")}</span><span class="tab active">${h("Main")}</span><span class="subdued">${h("Read-only")}</span></div>
 <div class="fields">
 <label>${h("Host")} <input required name="host" placeholder="db.example.com" maxlength="253"></label>
 <label>${h("Port")} <input required name="port" type="number" min="1" max="65535" value="3306"></label>
@@ -39,7 +38,6 @@ function connectHtml(assets) {
 <p id="tls-warning" class="hint tls-warning" hidden>${h("No TLS: the server is not verified and SQL and results travel unencrypted.")}</p>
 </fieldset>
 <fieldset id="dms-fields" hidden disabled>
-<div class="config-tabs"><span>${h("Config")}</span><span class="tab active">${h("Main")}</span><span class="subdued">${h("Read-only · Alibaba Cloud DMS")}</span></div>
 <div class="fields">
 <label>${h('Authentication')} <select name="authMode" aria-label="${h('DMS authentication')}"><option value="accessKey">${h('AccessKey (recommended)')}</option><option value="profile">${h('Existing CLI profile (advanced)')}</option></select></label>
 <label>${h("Region")} <input required name="region" aria-label="${h("DMS region")}" maxlength="43" value="cn-hangzhou" placeholder="cn-hangzhou"></label>
@@ -52,18 +50,26 @@ function connectHtml(assets) {
 </div>
 <p class="subdued hint" id="dms-ak-status">${h('Keys stay in VS Code SecretStorage; no CLI account setup is required.')}</p>
 </fieldset>
-<div class="fields hint"><label>${h("Search keyword")} <input required name="keyword" maxlength="128" placeholder="${h("Keyword used in DMS")}"></label><button type="button" id="dms-search" class="secondary">${h('Search databases')}</button></div>
-<fieldset id="dms-database-picker" class="hint"><label>${h('Select database')} <select required name="dmsDatabase" aria-label="${h('Select database')}"><option value="">${h('Search, then choose a database')}</option></select></label></fieldset>
+<fieldset id="dms-database-picker" class="hint">
+<div class="database-picker"><label for="dms-database-input">${h('Database')}</label><div id="dms-database-control">
+<input id="dms-database-input" name="keyword" required maxlength="128" role="combobox" aria-controls="dms-database-options" aria-expanded="false" aria-haspopup="listbox" aria-autocomplete="list" autocomplete="off" placeholder="${h('Enter all or part of the database name')}">
+<button type="button" id="dms-search" class="secondary">${h('Find')}</button>
+<select id="dms-database-options" name="dmsDatabase" size="2" aria-label="${h('Matching databases')}" hidden></select>
+</div></div>
+<p id="dms-search-status" class="subdued hint" role="status">${h('Enter a database name, click Find, then choose a match.')}</p>
+</fieldset>
 <fieldset id="dms-profile-fields" hidden disabled>
 <div class="fields hint">
 <label>${h("CLI profile")} <select required name="profile" aria-label="${h("Aliyun CLI profile")}"><option value="">${h("Choose a configured profile")}</option></select></label>
 <label>${h("Schema")} <input required name="schema" maxlength="128" placeholder="${h("Exact schema name")}"></label>
 <label>${h("Database ID")} <input required name="databaseId" inputmode="numeric" pattern="[1-9][0-9]{0,19}" maxlength="20" placeholder="${h("Verified DMS ID")}"></label>
 </div>
+<details id="dms-search-options" class="hint"><summary>${h('Advanced matching')}</summary>
+<div class="fields hint"><label>${h('DMS search name (optional)')} <input name="searchHint" maxlength="128" placeholder="${h('Leave blank to use the database name')}"></label></div>
+<p class="subdued hint">${h('Only needed if DMS finds this database under a different name.')}</p></details>
 <p id="dms-auth-status" class="subdued hint" role="status">${h("Choose the named Aliyun CLI profile that can access this DMS database.")}</p>
 <div class="form-actions"><button type="button" id="dms-profiles" class="secondary">${h("Refresh profiles")}</button><button type="button" id="dms-auth" class="plain">${h("Configure CLI authentication…")}</button></div>
 </fieldset>
-<p id="dms-search-status" class="subdued hint" role="status">${h('Search lists production MySQL, Doris and SelectDB databases. Database ID is filled automatically.')}</p>
 </fieldset>
 <div class="form-actions"><button type="submit" name="action" value="save" class="secondary">${h("Save")}</button><button type="submit" name="action" value="connect">＋ ${h("Connect")}</button><button type="button" id="close" class="plain">× ${h("Close")}</button></div>
 <p id="feedback" role="status"></p>

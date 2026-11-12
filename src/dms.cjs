@@ -13,7 +13,7 @@ function dmsConfig(input) {
   if (!name || name.length > 80 || group.length > 80 || /[\x00-\x1f]/.test(name + group)) throw Error('Enter a connection name (80 characters maximum).');
   if (!keyword || keyword.length > 128 || !database || database.length > 128 ||
       /[\x00-\x1f]/.test(keyword + database) || !/^[1-9][0-9]{0,19}$/.test(databaseId)) {
-    throw Error('Enter the DMS search keyword, exact schema, and verified numeric Database ID.');
+    throw Error('Enter the database name and verified numeric Database ID.');
   }
   if(!['profile','accessKey'].includes(authMode(input))) throw Error('Choose a supported DMS authentication method.');
   const profile=get('profile') || 'dms-prod', region=get('region') || 'cn-hangzhou';
@@ -31,7 +31,7 @@ function accessKeyCredentials(input) {
 function searchConfig(input) {
   const keyword=typeof input?.keyword==='string' ? input.keyword.trim() : '';
   const region=typeof input?.region==='string' ? input.region.trim() : '';
-  if(!keyword || keyword.length>128 || /[\x00-\x1f]/.test(keyword) || !/^[a-z]{2}-[a-z0-9-]{1,40}$/.test(region)) throw Error('Enter a region and a database search keyword.');
+  if(!keyword || keyword.length>128 || /[\x00-\x1f]/.test(keyword) || !/^[a-z]{2}-[a-z0-9-]{1,40}$/.test(region)) throw Error('Enter a region and a database name.');
   return {keyword,region};
 }
 function call(command, args, input) {
