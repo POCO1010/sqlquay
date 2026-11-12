@@ -10,7 +10,7 @@
 
 ## 当前发行范围
 
-离线 Demo 可直接使用。在线连接当前支持 macOS / Linux，随扩展附带 MIT 许可的只读策略，无需下载私人脚本。JDBC 需要 Java 8+、Python 3.10+ 和可信 JDBC 驱动；DMS 需要 Python 3.10+、已配置的阿里云 CLI 及现有 DMS 插件。Windows 当前可用离线 Demo，在线通道暂未支持。
+离线 Demo 可直接使用。在线连接当前支持 macOS / Linux，随扩展附带 MIT 许可的只读策略，无需下载私人脚本。JDBC 需要 Java 8+、Python 3.10+ 和可信 JDBC 驱动；DMS 需要 Python 3.10+、阿里云 CLI 及现有 DMS 插件；独立 AccessKey 方式无需先配置 CLI 账号。Windows 当前可用离线 Demo，在线通道暂未支持。
 
 正式发行 ID 为 **TomMajor.sqlquay**，保留 `dbWorkbench.*` 设置和 `dbw.*` 命令。旧版 `local-workbench.database-workbench` 的连接、凭据和工作区绑定可通过本机迁移助手导入；凭据不写导出文件，旧数据保留。[旧版迁移步骤](docs/MIGRATION.md)
 
@@ -18,7 +18,7 @@
 
 ## 先用离线 Demo 跑通
 
-1. 在 VS Code 的扩展视图选择 **Install from VSIX…**，打开 `artifacts/sqlquay-0.6.1.vsix`。
+1. 在 VS Code 的扩展视图选择 **Install from VSIX…**，打开 `artifacts/sqlquay-0.7.0.vsix`。
 2. 打开活动栏 **SQLQuay** → **Local Demo**，点击右侧 **New Query**。
 3. 按 `Cmd/Ctrl+Enter`，或点击 SQL 编辑器右上的 ▶。每次运行在旁边打开独立的 **Query Result #编号**，不会覆盖原结果。结果页改 SQL 后重新运行也会新开结果。
 4. 对象树的 **sandbox → Tables → products** 可查看字段。Demo 是进程内固定数据，只识别 `SELECT 1 AS probe` 及从 `products` 读取显式列的简单查询（可加 `WHERE id = …` 和 `LIMIT`）；不联网、不访问真实数据库。
@@ -38,11 +38,15 @@
 1. 新建连接，选择 **DMS**。认证方式默认为 **AccessKey（推荐）**。
 2. 点击 **获取 AccessKey…** 直达[当前 RAM 用户的 AccessKey 管理页](https://ram.console.aliyun.com/profile/access-keys)，自行登录有目标库查询权限的 RAM 用户并创建 AccessKey。不要使用主账号 AK。[官方创建说明](https://help.aliyun.com/zh/ram/user-guide/create-an-accesskey-pair)
 3. 回到插件，粘贴 **AccessKey ID** 和 **AccessKey Secret**，确认 **地域**，在 **数据库** 一项输入完整或部分库名，点 **查找**。
-4. 从同一输入框的下拉结果中选择目标库，无需重复填写库名或 Database ID；连接名称留空时也会自动填写。点 **保存** 只保存；点 **连接** 读取表清单后保存。
+4. 勾选一个或多个目标库，也可全选当前结果；再次搜索会保留已选库，方便按不同名称继续添加。Database ID 自动记录，连接名称留空时自动填为 `DMS`，可自行修改。点 **保存** 只保存配置；点 **连接** 按所选库逐个读取表清单，全部成功后保存，不读取数据行。
+
+保存后，侧栏按 **DMS 连接 → 数据库 → 表** 展开。一套 AK 只保存一份，每个库有独立的目标 ID、表清单和 DDL 缓存。新建查询或给已有文件选择执行/预览连接时，仍明确选择其中一个库；不会因切换侧栏而自动换库。
+
+**后续追加**：在这条 AccessKey DMS 连接右侧点 **+ 添加数据库…**，或右键选择同名操作。原库显示“已添加”，只需搜索并勾选新库，无需再粘贴 AK；保存后原有数据库 ID、文件绑定和缓存保持。旧版单库 AccessKey 连接也能用这个操作追加，保留原目标 ID。已有 CLI profile 和 JDBC 连接不自动转换。
 
 搜索只读取 DMS 库元数据，不执行 SQL。当前列出生产环境的 MySQL、Doris、SelectDB 及兼容实例；仅处理前 100 个匹配项，目标库缺失时输入更完整的库名。用户的 RAM/DMS 身份须有目标库查询权限；创建 AK 本身不授予库权限。
 
-密钥只在本机表单、执行器内存和 VS Code SecretStorage 中处理，不写入设置、连接清单、命令参数、临时凭据文件或日志。搜索后输入框清空，本次表单在内存中保留凭据；保存前关闭表单即丢弃。编辑连接时不回显密钥，留空保留原凭据；更换 AK 后须重新搜索选库，相关文件随后须重新选择连接。
+密钥只在本机表单、执行器内存和 VS Code SecretStorage 中处理，不写入设置、连接清单、命令参数、临时凭据文件或日志。搜索后密钥输入框清空，本次表单在内存中保留凭据；保存前关闭表单即丢弃。编辑连接时不回显密钥，留空保留原凭据；更换 AK 或地域后须重新搜索核实全部已添加库，相关文件随后须重新选择连接。
 
 独立 AK 模式仍需要本机 Python 3.10+、阿里云 CLI 和已有 `aliyun-cli-dms-enterprise` 插件，但不要求先在 CLI 配置账号。它始终使用扩展附带的只读执行器：凭据仅在 CLI 子进程环境中生效，忽略本机既有 profile，每次操作使用独立临时目录保存非密 AI-Mode 状态，结束后关闭并移除该目录。不会读取或改写现有 AI/CLI 凭据配置、切换默认 profile 或自动安装插件。普通查询、DDL 悬停和显式点击的数据预览都使用所选连接的身份，保留 EXPLAIN、扫描阈值、全机单查询锁和超时不重试。
 
@@ -58,7 +62,7 @@
 
 执行连接按文件保存在工作区状态，重开该文件仍可使用；不改 SQL 内容。状态栏始终显示当前文件的连接、库和通道。已明确选择的执行连接也用于该文件的悬停和预览。原有单文件预览选择和工作区默认预览连接仍只负责预览，不会自动成为执行连接。
 
-只改连接名称、分组或 DMS 搜索关键词，不会让原绑定失效。修改库、地址、端口、DMS Database ID、CLI profile/region、TLS 或认证后，仍须重新选择连接；不自动换库或重跑。
+只改连接名称、分组、DMS 查找名称，或在同一 AK 连接下追加数据库，不会让原绑定失效。修改库、地址、端口、DMS Database ID、CLI profile/region、TLS 或认证后，仍须重新选择连接；不自动换库或重跑。
 
 ## 多结果、固定与会话历史
 

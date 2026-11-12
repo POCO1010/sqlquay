@@ -8,9 +8,9 @@ for(const language of ['zh-cn','en']) test('connection routing, safety gates, ho
   const jdbc={id:'legacy',revision:'v1',name:'Existing JDBC',group:'',engine:'mysql',host:'fixture.invalid',port:3306,database:'sandbox'};
   const state=new Map([['connections',[jdbc]]]), calls=[], panels=[], commands=new Map(), errors=[];
   let tree, hoverProvider, completionProvider, stopped=false, secretReads=0, allowPlaintext=false, blocker;
-  const copied=[],deleted=[],terminals=[],opened=[],akSecrets=new Map(),akSearches=[];
+  const copied=[],deleted=[],terminals=[],opened=[],akSecrets=new Map(),akSearches=[],akExecutions=[];
   const akAuth={accessKeyId:'fixture-key-id',accessKeySecret:'fixture-key-secret'};
-  let failConnectionSave=false;
+  let failConnectionSave=false,akReadGate,akReadStarted,akQueryGate,akQueryStarted;
   const status={show(){this.visible=true;},hide(){this.visible=false;},dispose(){}}, stored=[];
   const documents=[], previewBindings=new Map();
   let pickedId, pickItems, duringPick, pickHistoryId, revealed;
@@ -64,14 +64,15 @@ for(const language of ['zh-cn','en']) test('connection routing, safety gates, ho
           return grid(['probe'],[['jdbc']]);
         }};
         if(request==='./dms.cjs') return {...load.apply(this,arguments),listDmsProfiles:async()=>[{name:'team-fixture',region:'cn-beijing',valid:true}],
-          searchDmsDatabases:async(_settings,search,auth)=>{akSearches.push(search);assert.deepEqual(auth,akAuth);return {databases:[{database:'sandbox',databaseId:'42',engine:'mysql',label:'Fixture'}],more:false};},
+          searchDmsDatabases:async(_settings,search,auth)=>{akSearches.push(search);assert.deepEqual(auth,akAuth);const target=search.keyword==='multi-b'?{database:'orders',databaseId:'43'}:search.keyword==='multi-c'?{database:'dimensions',databaseId:'44'}:{database:'sandbox',databaseId:'42'};return {databases:[{...target,engine:'mysql',label:target.database+' · Fixture · #'+target.databaseId}],more:false};},
           makeDms:()=>async(connection,sql,limit,table,auth)=>{
-          if(connection.authMode==='accessKey') assert.deepEqual(auth,akAuth);
+          if(connection.authMode==='accessKey' && akQueryGate) {const gate=akQueryGate;akQueryGate=undefined;akQueryStarted?.();await gate;}
+          if(connection.authMode==='accessKey') {assert.deepEqual(auth,akAuth);akExecutions.push({id:connection.id,accountId:connection.accountId,database:connection.database,databaseId:connection.databaseId,sql,table});}
           if (table) { calls.push(['preview','dms',connection.id,table,limit]);return grid(['id'],[['2']]); }
           calls.push(['dms',connection.id,sql]);
           if(stopped) throw new DmsStopped('DMS fixture stopped.');
           if(sql==='SHOW TABLES') return grid(['Tables_in_sandbox'],[['products']]);
-          if(sql.startsWith('SHOW CREATE TABLE')) return grid(['Table','Create Table'],[['products','CREATE TABLE products (dms INT)']]);
+          if(sql.startsWith('SHOW CREATE TABLE')) return grid(['Table','Create Table'],[['products','CREATE TABLE products ('+(connection.accountId?'db'+connection.databaseId+'_field':'dms')+' INT)']]);
           if(sql.startsWith('DESCRIBE')) return grid(['Field','Type'],[['id','BIGINT']]);
           return grid(['probe'],[['dms']]);
         }};
@@ -84,7 +85,7 @@ for(const language of ['zh-cn','en']) test('connection routing, safety gates, ho
   activate({extensionUri:'fixture',extensionPath:'fixture',subscriptions:[],
     globalState:{get:(key,other)=>state.get(key)??other,update:async(key,value)=>{if(key==='connections' && failConnectionSave){failConnectionSave=false;throw Error('fixture storage failure');}state.set(key,value);}},
     workspaceState:{get:key=>previewBindings.get(key),update:async(key,value)=>previewBindings.set(key,value)},
-    secrets:{get:async key=>{if(key.startsWith('dms-ak:')) return akSecrets.get(key);secretReads++;assert.equal(key,'jdbc:legacy');return '{"user":"reader","password":"fixture"}';},store:async(key,value)=>{stored.push([key,value]);if(key.startsWith('dms-ak:')) akSecrets.set(key,value);},delete:async key=>{deleted.push(key);akSecrets.delete(key);}}
+    secrets:{get:async key=>{if(key.startsWith('dms-ak:')) {if(akReadGate){const gate=akReadGate;akReadGate=undefined;akReadStarted?.();await gate;}return akSecrets.get(key);}secretReads++;assert.equal(key,'jdbc:legacy');return '{"user":"reader","password":"fixture"}';},store:async(key,value)=>{stored.push([key,value]);if(key.startsWith('dms-ak:')) akSecrets.set(key,value);},delete:async key=>{deleted.push(key);akSecrets.delete(key);}}
   });
   const run=(id,...args)=>commands.get('dbw.'+id)(...args);
   const jdbcNode=tree.getChildren().find(x=>x.connection?.id==='legacy');
@@ -459,7 +460,94 @@ for(const language of ['zh-cn','en']) test('connection routing, safety gates, ho
   const renamedAk=tree.getChildren().find(n=>n.connection?.id===akNode.connection.id);
   assert.equal(renamedAk.connection.revision,akNode.connection.revision);
   assert.deepEqual((await run('run')).rows,[['dms']]);
-  await run('remove',renamedAk);assert.ok(!akSecrets.has(akKey));
+  // An existing single-AK target keeps its ID and bindings when the user appends a database.
+  await run('addDmsDatabases',renamedAk);const legacyAppend=panels.at(-1);
+  await legacyAppend.receive({type:'ready'});assert.equal(legacyAppend.messages.at(-1).adding,true);
+  await legacyAppend.receive({type:'searchDmsDatabases',values:{keyword:'multi-b',region:'cn-beijing'}});
+  await legacyAppend.receive({type:'save',values:{channel:'dms',authMode:'accessKey',name:'Renamed AK',region:'cn-beijing',databases:[{keyword:'multi-b',database:'orders',databaseId:'43'}]}});
+  const converted=tree.getChildren().find(n=>n.connection?.id===akNode.connection.id);
+  assert.equal(converted.kind,'dmsAccount');assert.equal(tree.getChildren(converted).length,2);
+  assert.equal(tree.getChildren(converted)[0].connection.id,akNode.connection.id);
+  assert.equal(converted.connection.revision,akNode.connection.revision);
+  assert.deepEqual((await run('run')).rows,[['dms']]);
+  await run('remove',converted);assert.ok(!akSecrets.has(akKey));
   assert.deepEqual(JSON.parse(oldConnections),state.get('connections'));
+  const targets=[{keyword:'multi-a',database:'sandbox',databaseId:'42'},{keyword:'multi-b',database:'orders',databaseId:'43'}];
+  const multiValues={channel:'dms',authMode:'accessKey',name:'Shared AK',group:'',region:'cn-beijing',databases:targets};
+  const originalBindings=new Map(previewBindings);
+  await run('connect');const multiForm=panels.at(-1);
+  await multiForm.receive({type:'searchDmsDatabases',values:{...akAuth,keyword:'multi-a',region:'cn-beijing'}});
+  await multiForm.receive({type:'searchDmsDatabases',values:{keyword:'multi-b',region:'cn-beijing'}});
+  await multiForm.receive({type:'save',values:{...multiValues,databases:[...targets,{keyword:'not-searched',database:'forged',databaseId:'999'}]}});
+  includes(multiForm.messages.at(-1).message,'Search and select the database with this AccessKey first.');assert.equal(akSecrets.size,0);
+  failConnectionSave=true;await multiForm.receive({type:'save',values:multiValues});assert.equal(akSecrets.size,0);
+  assert.deepEqual(JSON.parse(oldConnections),state.get('connections'));
+  const beforeSaveQueries=akExecutions.length;await multiForm.receive({type:'save',values:multiValues});
+  assert.equal(akExecutions.length,beforeSaveQueries);assert.equal(akSecrets.size,1);
+  let account=tree.getChildren().find(n=>n.kind==='dmsAccount');const ownerId=account.connection.id,revision=account.connection.revision;
+  const schemas=tree.getChildren(account);assert.deepEqual(schemas.map(n=>n.label),['sandbox','orders']);
+  assert.ok(schemas.every(n=>n.connection.accountId===ownerId));assert.equal(tree.getParent(schemas[1]).connection.id,ownerId);
+  assert.equal(tree.getTreeItem(account).description,tr('DMS · {0} databases',2));
+  await run('newQuery',schemas[0]);const editorA=window.activeTextEditor;await run('run');
+  assert.equal(akExecutions.at(-1).databaseId,'42');assert.equal(akExecutions.at(-1).accountId,ownerId);
+  await run('newQuery',schemas[1]);const editorB=window.activeTextEditor;await run('run');
+  assert.equal(akExecutions.at(-1).databaseId,'43');assert.notEqual(schemas[0].connection.id,schemas[1].connection.id);
+  editorA.document.text=editorB.document.text='SELECT id FROM products;';
+  assert.match((await hoverFor(editorA)).contents[2].value,/db42_field/);
+  const hoverB=await hoverFor(editorB);assert.match(hoverB.contents[2].value,/db43_field/);
+  const cacheQueries=akExecutions.length;await hoverFor(editorA);assert.equal(akExecutions.length,cacheQueries);
+  await run('previewTable',...loadArgs(hoverB.contents[1]));assert.equal(akExecutions.at(-1).databaseId,'43');assert.equal(akExecutions.at(-1).table,'products');
+  await run('refresh',schemas[1]);assert.equal(akExecutions.at(-1).databaseId,'43');
+  const multiFile={...saved,uri:{scheme:'file',toString:()=> 'file:///workspace/multi.sql'},text:'SELECT 1 AS probe'};documents.push(multiFile);
+  window.activeTextEditor={document:multiFile,selection:{active:0}};pickHistoryId=undefined;pickedId=schemas[1].connection.id;await run('bindConnection');
+  assert.equal(previewBindings.get('sqlConnection:file:///workspace/multi.sql').id,schemas[1].connection.id);
+  assert.ok(pickItems.some(item=>item.connection?.id===schemas[0].connection.id && item.description.includes('sandbox')));
+  await run('run');assert.equal(akExecutions.at(-1).databaseId,'43');
+  const writesBeforeAppend=stored.length;
+  await run('addDmsDatabases',account);const append=panels.at(-1);await append.receive({type:'ready'});
+  assert.equal(append.messages.at(-1).connection.databases.length,2);assert.ok(!JSON.stringify(append.messages).includes(akAuth.accessKeySecret));
+  await append.receive({type:'searchDmsDatabases',values:{keyword:'multi-c',region:'cn-beijing'}});
+  const beforeAppend=JSON.stringify(state.get('connections'));failConnectionSave=true;
+  await append.receive({type:'save',values:{...multiValues,databases:[{keyword:'multi-c',database:'dimensions',databaseId:'44'}]}});
+  assert.equal(JSON.stringify(state.get('connections')),beforeAppend);assert.equal(stored.length,writesBeforeAppend);
+  await append.receive({type:'save',values:{...multiValues,databases:[{keyword:'multi-c',database:'dimensions',databaseId:'44'}]}});
+  account=tree.getChildren().find(n=>n.connection?.id===ownerId);
+  assert.equal(account.connection.revision,revision);assert.equal(stored.length,writesBeforeAppend);assert.equal(akSecrets.size,1);
+  assert.deepEqual(tree.getChildren(account).slice(0,2).map(n=>n.connection.id),schemas.map(n=>n.connection.id));
+  assert.equal(tree.getChildren(account).length,3);await run('run');assert.equal(akExecutions.at(-1).databaseId,'43');
+  await hoverFor(editorA);assert.equal(akExecutions.at(-1).sql,'SELECT 1 AS probe'); // Appending keeps the original DDL cache.
+  for(const [key,value] of originalBindings)assert.deepEqual(previewBindings.get(key),value);
+  assert.deepEqual(JSON.parse(oldConnections),state.get('connections').filter(c=>c.id!==ownerId));
+  await run('addDmsDatabases',account);const gated=panels.at(-1);let releaseRead;
+  akReadGate=new Promise(resolve=>releaseRead=resolve);const readStarted=new Promise(resolve=>akReadStarted=resolve);
+  const searchWaiting=gated.receive({type:'searchDmsDatabases',values:{keyword:'multi-c',region:'cn-beijing'}});await readStarted;
+  try {const before=akExecutions.length;window.activeTextEditor=editorA;await run('run');assert.equal(akExecutions.length,before);}
+  finally {releaseRead();akReadGate=undefined;await searchWaiting;gated.dispose();}
+  window.activeTextEditor={document:multiFile,selection:{active:0}};
+  await run('edit',account);const partial=panels.at(-1);
+  await partial.receive({type:'searchDmsDatabases',values:{...akAuth,keyword:'multi-c',region:'cn-beijing'}});
+  await partial.receive({type:'save',values:{...multiValues,databases:[{keyword:'multi-c',database:'dimensions',databaseId:'44'}]}});
+  includes(partial.messages.at(-1).message,'Search and select the database with this AccessKey first.');
+  assert.equal(tree.getChildren().find(n=>n.connection?.id===ownerId).connection.revision,revision);
+  partial.dispose();await run('run');assert.equal(akExecutions.at(-1).databaseId,'43');
+  stopped=true;await run('run');assert.equal(state.get('dmsPending'),true);stopped=false;
+  window.activeTextEditor=editorA;const blockedCalls=akExecutions.length;await run('run');assert.equal(akExecutions.length,blockedCalls);
+  await run('unlock');assert.equal(state.get('dmsPending'),false);
+  await run('remove',account);assert.equal(akSecrets.size,0);assert.deepEqual(JSON.parse(oldConnections),state.get('connections'));
+  assert.deepEqual(errors,[]);
+  await run('connect');const connectMany=panels.at(-1);
+  for(const [index,row] of targets.entries())await connectMany.receive({type:'searchDmsDatabases',values:{...row,region:'cn-beijing',...(index===0?akAuth:{})}});
+  const beforeConnect=akExecutions.length;await connectMany.receive({type:'connect',values:multiValues});
+  assert.deepEqual(akExecutions.slice(beforeConnect).map(c=>[c.databaseId,c.sql]),[['42','SHOW TABLES'],['43','SHOW TABLES']]);
+  const connected=tree.getChildren().find(n=>n.kind==='dmsAccount');
+  for(const schema of tree.getChildren(connected))assert.equal(tree.getChildren(tree.getChildren(schema)[0])[0].label,'products');
+  await run('edit',connected);const interrupted=panels.at(-1);
+  for(const [index,row] of targets.entries())await interrupted.receive({type:'searchDmsDatabases',values:{...row,region:'cn-beijing',...(index===0?akAuth:{})}});
+  let releaseQuery;akQueryGate=new Promise(resolve=>releaseQuery=resolve);const queryStarted=new Promise(resolve=>akQueryStarted=resolve);
+  const pendingSave=interrupted.receive({type:'connect',values:multiValues});await queryStarted;
+  await run('remove',connected);releaseQuery();await pendingSave;
+  assert.equal(akSecrets.size,0);includes(interrupted.messages.at(-1).message,'Connection target or credentials changed. Choose an execution connection for this file again.');
+  assert.deepEqual(JSON.parse(oldConnections),state.get('connections'));
+
   assert.deepEqual(errors,[]);
 });

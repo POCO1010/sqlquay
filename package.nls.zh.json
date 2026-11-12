@@ -4,6 +4,7 @@
   "command.connect": "新建连接",
   "command.newQuery": "新建查询",
   "command.refresh": "加载 / 刷新表清单",
+  "command.addDmsDatabases": "添加数据库…",
   "command.edit": "编辑连接",
   "command.remove": "移除连接",
   "command.describe": "属性",

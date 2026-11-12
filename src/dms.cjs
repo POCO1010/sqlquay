@@ -22,6 +22,25 @@ function dmsConfig(input) {
 }
 
 const authMode=connection=>connection.authMode??'profile';
+const isDmsAccount=connection=>connection?.channel==='dms' && authMode(connection)==='accessKey' && Array.isArray(connection.databases);
+function dmsAccountConfig(input) {
+  if(authMode(input)!=='accessKey' || !Array.isArray(input.databases) || !input.databases.length) throw Error('Choose one or more databases for this AccessKey connection.');
+  const seen=new Set();
+  const targets=input.databases.map(row=>{
+    if(!row || typeof row!=='object' || Array.isArray(row)) throw Error('Choose one or more databases for this AccessKey connection.');
+    const target=dmsConfig({...input,...row,authMode:'accessKey'});
+    if(seen.has(target.databaseId)) throw Error('Each database can be added only once.');
+    seen.add(target.databaseId);
+    return {keyword:target.keyword,database:target.database,databaseId:target.databaseId};
+  });
+  const {name,group,region}=dmsConfig({...input,...targets[0]});
+  return {channel:'dms',authMode:'accessKey',name,group,region,databases:targets};
+}
+function dmsTargets(connection) {
+  if(!isDmsAccount(connection)) return [connection];
+  const {databases,...account}=connection;
+  return databases.map(target=>({...account,...target,revision:account.revision,accountId:account.id}));
+}
 function accessKeyCredentials(input) {
   const accessKeyId=typeof input?.accessKeyId==='string' ? input.accessKeyId.trim() : '';
   const accessKeySecret=typeof input?.accessKeySecret==='string' ? input.accessKeySecret.trim() : '';
@@ -182,4 +201,4 @@ async function searchDmsDatabases(settings,input,credentials,transport=call) {
     object(row) && typeof row.databaseId==='string' && /^[1-9][0-9]{0,19}$/.test(row.databaseId) && typeof row.database==='string' && row.database.length>0 && row.database.length<=128 && typeof row.label==='string' && row.label.length<=512 && typeof row.engine==='string')) throw Error(setupMessages.search_failed);
   return {databases:result.databases,more:result.more};
 }
-module.exports = {dmsConfig,makeDms,DmsStopped,listDmsProfiles,parseProfiles,accessKeyCredentials,searchConfig,searchDmsDatabases,authMode};
+module.exports = {dmsConfig,makeDms,DmsStopped,listDmsProfiles,parseProfiles,accessKeyCredentials,searchConfig,searchDmsDatabases,authMode,dmsAccountConfig,dmsTargets,isDmsAccount};

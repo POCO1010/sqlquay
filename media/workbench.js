@@ -4,33 +4,48 @@
   const tr=window.SQLQuayI18n.translator(document.documentElement.lang);
   const $ = id => document.getElementById(id);
   if (document.body.dataset.view === 'connect') {
-    const form = $('connection'), feedback = $('feedback');
-    let engine='mysql',editing=false,profiles=[],databases=[],selectedDatabase,searchedKeyword='';
-    const databaseInput=form.elements.keyword,targets=form.elements.dmsDatabase;
+    const form = $('connection'), feedback = $('feedback'),databaseInput=form.elements.keyword;
+    let engine='mysql',editing=false,profiles=[],databases=[],searchedKeyword='';
+    const selectedDatabases=new Map(),savedDatabases=new Map(),checks=new Map();
+    const databaseKey=row=>JSON.stringify([row.databaseId,row.database]);
     const method=()=>form.elements.channel.value,authMode=()=>form.elements.authMode.value;
     const loadProfiles=()=>{$('dms-auth-status').textContent=tr('Reading local CLI profiles…');vscode.postMessage({type:'loadDmsProfiles'});};
     const clearKeys=()=>{for(const key of ['accessKeyId','accessKeySecret']) form.elements[key].value='';};
-    const closeTargets=()=>{targets.hidden=true;databaseInput.setAttribute('aria-expanded','false');};
-    const showTargets=()=>{if(databases.length){targets.hidden=false;databaseInput.setAttribute('aria-expanded','true');}};
-    const clearTargets=()=>{
-      databases=[];selectedDatabase=undefined;searchedKeyword='';targets.replaceChildren();closeTargets();
-      $('dms-search-status').textContent=tr('Enter a database name, click Find, then choose a match.');
+    const syncSelection=()=>{
+      $('dms-selected').hidden=!selectedDatabases.size;
+      $('dms-selection-count').textContent=tr('Selected databases: {0}. Save or connect when ready.',selectedDatabases.size);
+      $('dms-selected-databases').replaceChildren(...[...selectedDatabases].map(([key,row])=>{
+        const item=document.createElement('li'),label=document.createElement('span');label.textContent=row.label;item.append(label);
+        if(savedDatabases.has(key)) {const note=document.createElement('span');note.className='subdued';note.textContent=tr('Already added');item.append(note);}
+        else {
+          const remove=document.createElement('button');remove.type='button';remove.className='plain';remove.textContent='×';
+          remove.setAttribute('aria-label',tr('Remove {0} from selection',row.label));
+          remove.onclick=()=>{selectedDatabases.delete(key);syncSelection();databaseInput.focus();};item.append(remove);
+        }
+        return item;
+      }));
+      for(const [key,check] of checks) check.checked=selectedDatabases.has(key);
+      const available=databases.filter(row=>!savedDatabases.has(databaseKey(row)));
+      const count=available.filter(row=>selectedDatabases.has(databaseKey(row))).length;
+      $('dms-select-all').disabled=!available.length;
+      $('dms-select-all').checked=!!available.length && count===available.length;
+      $('dms-select-all').indeterminate=count>0 && count<available.length;
+      if(selectedDatabases.size && !form.elements.name.value.trim()) form.elements.name.value='DMS';
     };
-    const chooseTarget=()=>{
-      const selected=databases[targets.selectedIndex];if(!selected) return;
-      selectedDatabase=selected;databaseInput.value=selected.database;
-      if(!form.elements.name.value.trim()) form.elements.name.value=selected.database+' · DMS';
-      $('dms-search-status').textContent=tr('Selected: {0}',selected.label);closeTargets();databaseInput.focus();
+    const clearResults=()=>{
+      databases=[];checks.clear();$('dms-database-options').replaceChildren();$('dms-search-results').hidden=true;
+      $('dms-search-status').textContent=tr('Search for databases and select one or more. Search again to add others.');
     };
-    databaseInput.onclick=showTargets;
-    targets.onclick=chooseTarget;
-    targets.onkeydown=e=>{if(e.key==='Enter'){e.preventDefault();chooseTarget();}if(e.key==='Escape'){e.preventDefault();closeTargets();databaseInput.focus();}};
-    databaseInput.onkeydown=e=>{
-      if(e.key==='Enter'){e.preventDefault();$('dms-search').click();}
-      if(e.key==='ArrowDown' && databases.length){e.preventDefault();showTargets();if(targets.selectedIndex<0)targets.selectedIndex=0;targets.focus();}
-      if(e.key==='Escape'){e.preventDefault();closeTargets();}
+    const selectDatabase=(row,checked)=>{
+      const key=databaseKey(row);
+      if(checked) selectedDatabases.set(key,{...row,keyword:searchedKeyword});
+      else if(!savedDatabases.has(key)) selectedDatabases.delete(key);
     };
-    for(const event of ['pointerdown','focusin']) document.addEventListener(event,e=>{if(!$('dms-database-control').contains(e.target)) closeTargets();});
+    $('dms-select-all').onchange=()=>{
+      for(const row of databases) if(!savedDatabases.has(databaseKey(row))) selectDatabase(row,$('dms-select-all').checked);
+      syncSelection();
+    };
+    databaseInput.onkeydown=e=>{if(e.key==='Enter'){e.preventDefault();$('dms-search').click();}};
     const working=busy=>{
       const dms=method()==='dms',ak=authMode()==='accessKey';
       $('methods').disabled=busy||editing;
@@ -48,17 +63,21 @@
     $('dms-auth').onclick=()=>vscode.postMessage({type:'configureDms'});
     $('dms-ak-guide').onclick=()=>vscode.postMessage({type:'openAccessKeyGuide'});
     $('dms-search').onclick=()=>{
-      const values={keyword:form.elements.keyword.value,region:form.elements.region.value,accessKeyId:form.elements.accessKeyId.value,accessKeySecret:form.elements.accessKeySecret.value};
+      const values={keyword:databaseInput.value,region:form.elements.region.value,accessKeyId:form.elements.accessKeyId.value,accessKeySecret:form.elements.accessKeySecret.value};
       if(!values.keyword.trim() || !values.region.trim()) {feedback.textContent=tr('Enter a region and a database name.');return;}
-      clearTargets();searchedKeyword=values.keyword.trim();feedback.textContent=tr('Searching databases…');working(true);
+      clearResults();searchedKeyword=values.keyword.trim();feedback.textContent=tr('Searching databases…');working(true);
       vscode.postMessage({type:'searchDmsDatabases',values});clearKeys();
     };
     form.addEventListener('input',e=>{
-      if(authMode()==='accessKey' && ['accessKeyId','accessKeySecret','region','keyword'].includes(e.target.name)) clearTargets();
+      if(authMode()!=='accessKey') return;
+      if(e.target.name==='keyword') clearResults();
+      if(['accessKeyId','accessKeySecret','region'].includes(e.target.name)) {
+        clearResults();selectedDatabases.clear();for(const [key,row] of savedDatabases) selectedDatabases.set(key,{...row});syncSelection();
+      }
     });
     form.addEventListener('change',e=>{
       if(e.target.name==='channel' || e.target.name==='authMode') {
-        closeTargets();if(e.target.name==='authMode') clearTargets();
+        if(e.target.name==='authMode') {selectedDatabases.clear();savedDatabases.clear();clearResults();syncSelection();}
         feedback.textContent='';working(false);
         if(method()==='dms' && authMode()==='profile') loadProfiles();
       }
@@ -77,11 +96,15 @@
       const values={...Object.fromEntries(new FormData(form)),channel:method()};
       if(values.channel==='dms') {
         values.authMode=authMode();
-        if(values.authMode==='accessKey' && !selectedDatabase){feedback.textContent=tr('Search and select the database with this AccessKey first.');return;}
-        values.database=values.authMode==='accessKey'?selectedDatabase.database:form.elements.schema.value;
-        values.databaseId=values.authMode==='accessKey'?selectedDatabase.databaseId:form.elements.databaseId.value;
-        values.keyword=values.authMode==='accessKey'?searchedKeyword:(form.elements.searchHint.value.trim()||values.database);
-        delete values.schema;delete values.dmsDatabase;delete values.searchHint;
+        if(values.authMode==='accessKey') {
+          if(!selectedDatabases.size){feedback.textContent=tr('Choose one or more databases for this AccessKey connection.');return;}
+          values.databases=[...selectedDatabases.values()].map(({keyword,database,databaseId})=>({keyword,database,databaseId}));
+          delete values.keyword;
+        } else {
+          values.database=form.elements.schema.value;values.databaseId=form.elements.databaseId.value;
+          values.keyword=form.elements.searchHint.value.trim()||values.database;
+        }
+        delete values.schema;delete values.searchHint;
       }
       const type=e.submitter?.value==='save'?'save':'connect';
       feedback.textContent=type==='connect'?tr('Checking connection…'):tr('Saving…');working(true);
@@ -91,15 +114,17 @@
     window.addEventListener('message',({data:m})=>{
       if(m?.type==='configure' && m.connection) {
         const {channel,name,group,database,engine:kind,host,port,keyword,databaseId,sslMode,profile,region,authMode:auth}=m.connection;
-        $('heading').textContent=tr('Edit connection');editing=true;form.elements.channel.value=channel;
-        const values=channel==='dms'?{name,group,schema:database,keyword:database,searchHint:keyword===database?'':keyword,databaseId,region:region??'cn-hangzhou',authMode:auth??'profile'}:{name,group,database,engine:kind,host,port,sslMode:sslMode??'VERIFY_IDENTITY'};
+        $('heading').textContent=m.adding?tr('Add databases'):tr('Edit connection');editing=true;form.elements.channel.value=channel;
+        const values=channel==='dms'?{name,group,schema:database,keyword:'',searchHint:keyword===database?'':keyword,databaseId,region:region??'cn-hangzhou',authMode:auth??'profile'}:{name,group,database,engine:kind,host,port,sslMode:sslMode??'VERIFY_IDENTITY'};
         for(const [key,value] of Object.entries(values)) form.elements[key].value=value??'';
         if(channel==='jdbc') {form.elements.user.required=false;form.elements.user.placeholder=tr('Leave blank to keep credentials');engine=kind;}
         if(channel==='dms' && authMode()==='profile') {$('dms-search-options').open=keyword!==database;form.elements.profile.add(new Option(profile??'dms-prod',profile??'dms-prod',true,true));loadProfiles();}
         if(channel==='dms' && authMode()==='accessKey') {
-          searchedKeyword=keyword;selectedDatabase={database,databaseId,label:database+' · #'+databaseId};databases=[selectedDatabase];
-          targets.replaceChildren(new Option(selectedDatabase.label,databaseId));targets.selectedIndex=-1;
-          $('dms-search-status').textContent=tr('Selected: {0}',selectedDatabase.label);
+          for(const row of m.connection.databases??[m.connection]) {
+            const entry={keyword:row.keyword,database:row.database,databaseId:row.databaseId,label:row.database+' · #'+row.databaseId};
+            savedDatabases.set(databaseKey(entry),entry);selectedDatabases.set(databaseKey(entry),{...entry});
+          }
+          syncSelection();
           for(const key of ['accessKeyId','accessKeySecret']) form.elements[key].placeholder=tr('Leave blank to keep credentials');
         }
         working(false);
@@ -112,12 +137,18 @@
         $('dms-auth-status').textContent=m.message||(profiles.length?tr('Select a local CLI profile. Region can be adjusted for your DMS service.'):tr('No named profile found. Configure CLI authentication in the terminal, then refresh.'));
       }
       if(m?.type==='dmsDatabases') {
-        databases=Array.isArray(m.databases)?m.databases:[];
-        targets.replaceChildren(...databases.map(row=>new Option(row.label,row.databaseId)));targets.size=Math.min(Math.max(databases.length,2),6);targets.selectedIndex=-1;
+        databases=Array.isArray(m.databases)?m.databases:[];checks.clear();
+        $('dms-database-options').replaceChildren(...databases.map(row=>{
+          const key=databaseKey(row),label=document.createElement('label'),check=document.createElement('input'),text=document.createElement('span');
+          label.className='database-option';check.type='checkbox';check.disabled=savedDatabases.has(key);text.textContent=row.label;
+          if(selectedDatabases.has(key)) selectedDatabases.set(key,{...row,keyword:searchedKeyword});
+          check.onchange=()=>{selectDatabase(row,check.checked);syncSelection();};checks.set(key,check);label.append(check,text);return label;
+        }));
+        $('dms-search-results').hidden=!databases.length;syncSelection();
         feedback.textContent=databases.length?'':tr('No supported production database found. Check permissions or enter a more specific database name.');
-        $('dms-search-status').textContent=databases.length?tr('Found {0} databases. Choose one, then save or connect.',databases.length)+(m.more?' '+tr('Only the first 100 matches are searched. Enter a more specific database name if yours is missing.'):''):'';
+        $('dms-search-status').textContent=databases.length?tr('Found {0} databases. Select the ones to add.',databases.length)+(m.more?' '+tr('Only the first 100 matches are searched. Enter a more specific database name if yours is missing.'):''):'';
         for(const key of ['accessKeyId','accessKeySecret']) form.elements[key].placeholder=tr('Leave blank to keep the entered AccessKey');
-        working(false);showTargets();databaseInput.focus();
+        working(false);databaseInput.focus();
       }
       if(m?.type==='error') {feedback.textContent=m.message;working(false);}
     });

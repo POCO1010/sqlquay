@@ -50,10 +50,17 @@ button.secondary { background:var(--vscode-button-secondaryBackground,#3b3b3b); 
 .fields label { display:grid; grid-template-columns:minmax(72px,34%) 1fr; align-items:center; gap:8px; }
 .fields input,.fields select { height:32px; }
 .database-picker { display:grid; grid-template-columns:minmax(72px,17%) 1fr; align-items:center; gap:8px; max-width:790px; }
-#dms-database-control { position:relative; display:flex; gap:8px; min-width:0; }
+#dms-database-control { display:flex; gap:8px; min-width:0; }
 #dms-database-input { flex:1; width:0; }
-#dms-database-options { position:absolute; top:calc(100% + 4px); left:0; width:100%; z-index:2; padding:4px; }
-#dms-database-options option { padding:7px; }
+#dms-search-results { max-width:790px; border:1px solid var(--border); border-radius:5px; }
+#dms-database-options { max-height:220px; overflow:auto; border-top:1px solid var(--border); }
+.database-option { display:flex; align-items:center; gap:8px; padding:8px; overflow-wrap:anywhere; }
+.database-option:hover { background:var(--hover); }
+.database-option input { margin:0; accent-color:var(--focus); }
+#dms-selected-databases { list-style:none; padding:0; margin:8px 0; max-width:790px; }
+#dms-selected-databases li { display:flex; align-items:center; gap:12px; margin:4px 0; padding:4px 8px; background:var(--hover); border-radius:4px; overflow-wrap:anywhere; }
+#dms-selected-databases li > :last-child { margin-left:auto; flex-shrink:0; }
+#dms-selection-count { margin:0; }
 #dms-search-options summary { cursor:pointer; color:var(--muted); }
 #dms-search-options label { grid-template-columns:1fr; }
 .form-actions { justify-content:center; margin-top:16px; }

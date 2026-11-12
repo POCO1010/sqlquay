@@ -5,7 +5,7 @@
 - 展示名：SQLQuay。
 - Marketplace Publisher：`TomMajor`，由所有者完成创建。
 - 正式扩展 ID：`TomMajor.sqlquay`。
-- 当前构建包：`artifacts/sqlquay-0.6.1.vsix`，标记 Preview。
+- 当前构建包：`artifacts/sqlquay-0.7.0.vsix`，标记 Preview。
 - 许可证：MIT。外部 Java、Python、阿里云 CLI 与 Connector/J 不随包分发。
 - GitHub：<https://github.com/POCO1010/sqlquay>，默认分支 `main`。
 
@@ -34,7 +34,7 @@ JDBC/DMS 的只读策略位于 `policy/`，没有真实连接、数据库 ID 或
 
 1. 在独立 VS Code 配置中安装正式 VSIX，完成 Demo、两种通道的离线夹具与迁移验证。
 2. 打开 [TomMajor 管理页](https://marketplace.visualstudio.com/manage/publishers/TomMajor)。
-3. 新建 Visual Studio Code 扩展，只上传 `sqlquay-0.6.1.vsix`。不要上传 `sqlquay-legacy-migration-0.4.3.vsix`。
+3. 新建 Visual Studio Code 扩展，只上传 `sqlquay-0.7.0.vsix`。不要上传 `sqlquay-legacy-migration-0.4.3.vsix`。
 4. 根据平台返回的校验结果处理，核对展示名、Publisher、版本、MIT 许可和安装说明。
 5. 从市场下载到独立配置验收，再安排已有用户迁移；不要删除旧版数据或唯一可用的旧 VSIX。
 

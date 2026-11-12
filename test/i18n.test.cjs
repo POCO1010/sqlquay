@@ -21,7 +21,7 @@ test('translation substitutes literal arguments and preserves unknown database m
 test('manifest titles and all settings have English and Chinese resources',()=>{
   const manifest=require('../package.json'),en=require('../package.nls.json'),zh=require('../package.nls.zh.json');
   const keys=[...JSON.stringify(manifest).matchAll(/%([^%]+)%/g)].map(m=>m[1]);
-  assert.equal(keys.length,22);
+  assert.equal(keys.length,23);
   assert.deepEqual(Object.keys(en).sort(),Object.keys(zh).sort());
   for(const key of keys) {assert.ok(en[key]);assert.ok(zh[key]);}
   assert.equal(manifest.name,'sqlquay');assert.equal(manifest.publisher,'TomMajor');

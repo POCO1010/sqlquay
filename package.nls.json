@@ -4,6 +4,7 @@
   "command.connect": "New Connection",
   "command.newQuery": "New Query",
   "command.refresh": "Load / Refresh Tables",
+  "command.addDmsDatabases": "Add Databases…",
   "command.edit": "Edit Connection",
   "command.remove": "Remove Connection",
   "command.describe": "Properties",

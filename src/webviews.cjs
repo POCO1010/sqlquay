@@ -52,11 +52,12 @@ function connectHtml(assets) {
 </fieldset>
 <fieldset id="dms-database-picker" class="hint">
 <div class="database-picker"><label for="dms-database-input">${h('Database')}</label><div id="dms-database-control">
-<input id="dms-database-input" name="keyword" required maxlength="128" role="combobox" aria-controls="dms-database-options" aria-expanded="false" aria-haspopup="listbox" aria-autocomplete="list" autocomplete="off" placeholder="${h('Enter all or part of the database name')}">
+<input id="dms-database-input" name="keyword" type="search" maxlength="128" autocomplete="off" aria-describedby="dms-search-status" placeholder="${h('Enter all or part of the database name')}">
 <button type="button" id="dms-search" class="secondary">${h('Find')}</button>
-<select id="dms-database-options" name="dmsDatabase" size="2" aria-label="${h('Matching databases')}" hidden></select>
 </div></div>
-<p id="dms-search-status" class="subdued hint" role="status">${h('Enter a database name, click Find, then choose a match.')}</p>
+<div id="dms-search-results" class="hint" hidden><label class="database-option"><input type="checkbox" id="dms-select-all">${h('Select all matches')}</label><div id="dms-database-options" role="group" aria-label="${h('Matching databases')}"></div></div>
+<div id="dms-selected" class="hint" hidden><p id="dms-selection-count" class="subdued" role="status"></p><ul id="dms-selected-databases" aria-label="${h('Selected databases')}"></ul></div>
+<p id="dms-search-status" class="subdued hint" role="status">${h('Search for databases and select one or more. Search again to add others.')}</p>
 </fieldset>
 <fieldset id="dms-profile-fields" hidden disabled>
 <div class="fields hint">
