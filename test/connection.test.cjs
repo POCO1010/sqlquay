@@ -69,7 +69,7 @@ test('append keeps saved targets selected and never asks for their keys again',(
   const view=create();view.receive({type:'configure',adding:true,connection:{channel:'dms',authMode:'accessKey',name:'Saved',database:'sandbox',keyword:'sand',databaseId:'42',region:'cn-beijing'}});
   assert.equal(view.get('heading').textContent,'Add databases');assert.equal(view.fields.keyword.value,'');
   view.input('keyword','sand');view.get('dms-search').onclick();view.receive({type:'dmsDatabases',databases:rows});
-  assert.equal(view.get('dms-database-options').children[0].children[0].disabled,true);
+  assert.equal(view.get('dms-database-options').children[0].children[0].disabled,false);
   assert.equal(view.get('dms-selected-databases').children[0].children[1].textContent,'Already added');
   view.check(1,true);view.submit();assert.equal(view.sent.at(-1).values.databases.length,2);
   assert.equal(view.sent.at(-1).values.databases[0].databaseId,'42');assert.equal(view.sent.at(-1).values.accessKeyId,'');
@@ -105,4 +105,18 @@ test('AK inputs stay masked in the form through multi-selection, repeated search
   view.submit();retained();assert.equal(view.sent.at(-1).values.databases.length,2);
   const html=connectHtml({language:'en',csp:"'self'",css:'a',script:'b',i18n:'c',icon:'d'});
   for(const field of ['accessKeyId','accessKeySecret'])assert.ok(html.includes('name="'+field+'" type="password" autocomplete="off"'));
+});
+
+test('saved databases can be explicitly removed, including all, without losing authentication',()=>{
+  const view=create();const stored=rows.map(row=>({...row,keyword:'sand'}));
+  view.receive({type:'configure',connection:{channel:'dms',authMode:'accessKey',name:'Saved',region:'cn-beijing',databases:stored}});
+  view.get('dms-selected-databases').children[0].children.at(-1).onclick();
+  assert.equal(view.get('dms-selected-databases').children.length,1);assert.equal(view.get('dms-removal-status').hidden,false);
+  view.input('region','cn-hangzhou');assert.equal(view.get('dms-selected-databases').children.length,1);
+  view.input('keyword','sand');view.get('dms-search').onclick();view.receive({type:'dmsDatabases',databases:rows});
+  assert.equal(view.get('dms-database-options').children[0].children[0].checked,false);
+  view.submit();assert.deepEqual(view.sent.at(-1).values.removedDatabases,[{database:'sandbox',databaseId:'42'}]);
+  view.receive({type:'error',message:'Offline save failure'});assert.equal(view.get('dms-selected-databases').children.length,1);
+  view.get('dms-selected-databases').children[0].children.at(-1).onclick();view.submit();
+  assert.deepEqual(view.sent.at(-1).values.databases,[]);assert.equal(view.sent.at(-1).values.removedDatabases.length,2);
 });

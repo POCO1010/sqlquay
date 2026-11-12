@@ -37,12 +37,24 @@ function activate(context) {
     if (!current || current.revision !== old.revision) throw Error(tr("Connection target or credentials changed. Choose an execution connection for this file again."));
     return current;
   };
+  const liveConfigured=old=>{
+    const current=saved().find(c=>c.id===old.id);
+    if(!current || current.revision!==old.revision) throw Error(tr("Connection target or credentials changed. Choose an execution connection for this file again."));
+    return current;
+  };
   function getTarget(node) {
+    if(node?.kind==='dmsAccount') {
+      const target=dmsTargets(liveConfigured(node.connection))[0];
+      if(!target) throw Error('Choose a database under this DMS connection.');
+      return target;
+    }
     const id = node?.connection?.id ?? activeId;
     const connection = all().find(c => c.id === id);
     if (!connection) throw Error(tr("This connection is no longer available."));
     return connection;
   }
+
+  const configured=node=>owner(node?.kind==='dmsAccount' ? liveConfigured(node.connection):getTarget(node));
 
   const workspaceDdlKey = 'ddlConnection:workspaceDefault';
   const workspaceDdl = () => context.workspaceState.get(workspaceDdlKey);
@@ -51,7 +63,7 @@ function activate(context) {
   const tree = {
     onDidChangeTreeData: changed.event,
     getTreeItem(node) {
-      const children = node.kind !== 'ddlDefault' && node.kind !== 'column' && (node.kind !== 'table' || columns.get(node.connection.id)?.has(node.label));
+      const children = !(node.kind==='dmsAccount' && !node.connection.databases.length) && node.kind !== 'ddlDefault' && node.kind !== 'column' && (node.kind !== 'table' || columns.get(node.connection.id)?.has(node.label));
       const item = new TreeItem(node.label,!children ? State.None : (node.connection?.engine === 'demo' && node.kind !== 'table') || node.kind === 'group' ? State.Expanded : State.Collapsed);
       item.id = JSON.stringify([node.connection?.id,node.kind,node.table,node.label]);
       item.iconPath = new ThemeIcon(branch[node.kind]);
@@ -451,7 +463,7 @@ function activate(context) {
         busy=true;
         try {
           if(online || pendingChannel()) throw Error('Wait for the active query to finish.');
-          if(edit) live(edit);
+          if(edit) liveConfigured(edit);
           const search=searchConfig(message.values);
           online=true;
           try {
@@ -477,25 +489,31 @@ function activate(context) {
 
       try {
         if (!workspace.isTrusted) throw Error(tr("Online connection configuration is disabled in untrusted workspaces."));
-        if (edit) live(edit);
+        const prior=edit ? liveConfigured(edit):undefined;
         const channel = message.values.channel;
         if (!['jdbc','dms'].includes(channel) || (edit && channel !== channelOf(edit))) {
           throw Error(tr("To change the connection method, create a new connection."));
         }
         if(edit && channel==='dms' && authMode(edit)!==authMode(message.values)) throw Error('To change DMS authentication, create a new connection.');
         const multiple=channel==='dms' && Array.isArray(message.values.databases);
-        if(isDmsAccount(edit) && !multiple) throw Error('Choose one or more databases for this AccessKey connection.');
-        let data=multiple ? dmsAccountConfig(message.values) : channel==='dms' ? dmsConfig(message.values) : connectionConfig(message.values);
-        const previousTargets=edit ? dmsTargets(edit) : [];
+        if(isDmsAccount(prior) && !multiple) throw Error('Choose one or more databases for this AccessKey connection.');
+        let data=multiple ? dmsAccountConfig(message.values,{allowEmpty:!!edit}) : channel==='dms' ? dmsConfig(message.values) : connectionConfig(message.values);
+        const previousTargets=prior ? dmsTargets(prior) : [];
+        const removals=message.values.removedDatabases??[];
+        if(!Array.isArray(removals) || (removals.length && (!multiple || !edit))) throw Error('The database selection changed. Reopen the connection and choose the databases again.');
         if(multiple && edit) {
-          const proposed=new Map(data.databases.map(c=>[databaseKey(c),c]));
-          const retained=previousTargets.map(c=>proposed.get(databaseKey(c))??c);
+          const proposed=new Map(data.databases.map(c=>[databaseKey(c),c])),removed=new Set();
+          for(const row of removals) {
+            if(!row || typeof row!=='object' || !previousTargets.some(c=>databaseKey(c)===databaseKey(row)) || proposed.has(databaseKey(row))) throw Error('The database selection changed. Reopen the connection and choose the databases again.');
+            removed.add(databaseKey(row));
+          }
+          const retained=previousTargets.filter(c=>!removed.has(databaseKey(c))).map(c=>proposed.get(databaseKey(c))??c);
           const known=new Set(previousTargets.map(databaseKey));
-          data=dmsAccountConfig({...data,databases:[...retained,...data.databases.filter(c=>!known.has(databaseKey(c)))]});
+          data=dmsAccountConfig({...data,databases:[...retained,...data.databases.filter(c=>!known.has(databaseKey(c)))]},{allowEmpty:true});
         }
         const connection = {...data,channel,id:edit?.id ?? randomUUID(),revision:edit ? edit.revision : randomUUID()};
-        if(multiple) connection.databases=connection.databases.map((database,index)=>({...database,
-          id:previousTargets.find(c=>databaseKey(c)===databaseKey(database))?.id ?? (index===0 ? connection.id:randomUUID())}));
+        if(multiple) connection.databases=connection.databases.map(database=>({...database,
+          id:previousTargets.find(c=>databaseKey(c)===databaseKey(database))?.id ?? randomUUID()}));
         let credentials, newUser = false;
         if (channel === 'jdbc') {
           const user = typeof message.values.user === 'string' ? message.values.user.trim() : '';
@@ -532,13 +550,13 @@ function activate(context) {
         const targets=dmsTargets(connection),catalogs=new Map();
         if(message.type==='connect') for(const target of targets) {
           if(disposed) return;
-          if(edit) live(edit);
+          if(edit) liveConfigured(edit);
           const catalog=await query(target,'SHOW TABLES',10000,credentials);
           if(catalog.truncated) throw Error(tr("The table list exceeded the metadata display limit."));
           catalogs.set(target.id,catalog);
         }
         if (disposed) return;
-        if(edit) live(edit);
+        if(edit) liveConfigured(edit);
         const existing = saved();
         if (newUser) await context.secrets.store(secretKey(connection.id),JSON.stringify(credentials));
         let previousAk;
@@ -554,12 +572,14 @@ function activate(context) {
           }
           throw error;
         }
+        const retainedIds=new Set(targets.map(c=>c.id));
+        for(const previous of previousTargets) if(!retainedIds.has(previous.id)) {tables.delete(previous.id);columns.delete(previous.id);clearDdl(previous);}
         for(const target of targets) {
           const changedTarget=!previousTargets.some(c=>c.id===target.id && c.revision===target.revision);
           if(catalogs.has(target.id)) tables.set(target.id,tableNames(catalogs.get(target.id))); else if(changedTarget) tables.delete(target.id);
           if(changedTarget) {columns.delete(target.id);clearDdl(target);}
         }
-        activeId = targets[0].id; changed.fire(); setEditorContext(); panel.dispose();
+        activeId = targets[0]?.id??'demo'; changed.fire(); setEditorContext(); panel.dispose();
       } catch (error) {
         if (!disposed) await panel.webview.postMessage({type:'error',message:tr(error.message)});
       } finally { busy=false; }
@@ -570,14 +590,14 @@ function activate(context) {
 
   function tableNames(catalog) { return catalog.rows.map(row=>row[0]).filter(name=>typeof name==='string' && name); }
   register('connect',()=>openForm());
-  register('edit',node=>{const connection=getTarget(node); if(connection.engine!=='demo') openForm(owner(connection));});
+  register('edit',node=>{const connection=configured(node); if(connection.engine!=='demo') openForm(connection);});
   register('addDmsDatabases',node=>{
-    const connection=getTarget(node);
+    const connection=configured(node);
     if(channelOf(connection)!=='dms' || authMode(connection)!=='accessKey') throw Error('Choose an AccessKey DMS connection from the Database tree.');
     openForm(owner(connection),true);
   });
   register('remove',async node=>{
-    const connection=owner(getTarget(node)); if(connection.engine==='demo') return;
+    const connection=configured(node); if(connection.engine==='demo') return;
     const confirmed=await window.showWarningMessage(tr('Remove {0}?',connection.name),{modal:true},tr("Remove"));
     if (confirmed!==tr("Remove")) return;
     await context.globalState.update('connections',context.globalState.get('connections',[]).filter(c=>c.id!==connection.id));

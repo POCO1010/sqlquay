@@ -57,6 +57,7 @@ function connectHtml(assets) {
 </div></div>
 <div id="dms-search-results" class="hint" hidden><label class="database-option"><input type="checkbox" id="dms-select-all">${h('Select all matches')}</label><div id="dms-database-options" role="group" aria-label="${h('Matching databases')}"></div></div>
 <div id="dms-selected" class="hint" hidden><p id="dms-selection-count" class="subdued" role="status"></p><ul id="dms-selected-databases" aria-label="${h('Selected databases')}"></ul></div>
+<p id="dms-removal-status" class="subdued hint" role="status" hidden></p>
 <p id="dms-search-status" class="subdued hint" role="status">${h('Search for databases and select one or more. Search again to add others.')}</p>
 </fieldset>
 <fieldset id="dms-profile-fields" hidden disabled>

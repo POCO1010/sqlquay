@@ -67,6 +67,12 @@ async function main(){
    assert.equal(await ak.getByLabel('AccessKey Secret',{exact:true}).inputValue(),'fixture-key-secret');
    await ak.getByRole('button',{name:'Save',exact:true}).click();
    assert.equal((await ak.evaluate(()=>window.sent.at(-1))).values.databases.length,2);
+   const editing=await create(browser,connectHtml(assets));
+   await dispatch(editing,{type:'configure',connection:{channel:'dms',authMode:'accessKey',name:'Saved fixture',region:'cn-beijing',databases:[{keyword:'sandbox',database:'sandbox',databaseId:'42'}]}});
+   await editing.getByRole('button',{name:'Remove sandbox · #42 from this connection',exact:true}).click();
+   await editing.getByRole('button',{name:'Save',exact:true}).click();
+   const removal=await editing.evaluate(()=>window.sent.at(-1));
+   assert.deepEqual(removal.values.databases,[]);assert.deepEqual(removal.values.removedDatabases,[{database:'sandbox',databaseId:'42'}]);
    const dms=await create(browser,connectHtml(assets),520,true);
    await dms.getByRole('radio',{name:'DMS',exact:true}).check();
    assert.equal(await dms.getByLabel('Username').isVisible(),false);

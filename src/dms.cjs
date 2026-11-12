@@ -7,34 +7,36 @@ const {dmsReadonly} = require('./query.cjs');
 
 class DmsStopped extends Error {}
 const profileName=value=>typeof value==='string' && value.length>0 && value.length<=128 && !/^[\s-]|[\x00-\x1f\x7f]/.test(value);
-function dmsConfig(input) {
-  const get = key => typeof input[key] === 'string' ? input[key].trim() : '';
-  const name = get('name'), group = get('group'), keyword = get('keyword'), database = get('database'), databaseId = get('databaseId');
-  if (!name || name.length > 80 || group.length > 80 || /[\x00-\x1f]/.test(name + group)) throw Error('Enter a connection name (80 characters maximum).');
-  if (!keyword || keyword.length > 128 || !database || database.length > 128 ||
-      /[\x00-\x1f]/.test(keyword + database) || !/^[1-9][0-9]{0,19}$/.test(databaseId)) {
-    throw Error('Enter the database name and verified numeric Database ID.');
-  }
+function dmsIdentity(input) {
+  const get=key=>typeof input[key]==='string' ? input[key].trim() : '';
+  const name=get('name'),group=get('group');
+  if(!name || name.length>80 || group.length>80 || /[\x00-\x1f]/.test(name+group)) throw Error('Enter a connection name (80 characters maximum).');
   if(!['profile','accessKey'].includes(authMode(input))) throw Error('Choose a supported DMS authentication method.');
-  const profile=get('profile') || 'dms-prod', region=get('region') || 'cn-hangzhou';
-  if (!profileName(profile) || !/^[a-z]{2}-[a-z0-9-]{1,40}$/.test(region)) throw Error('Choose a valid Aliyun CLI profile and region.');
-  return {channel:'dms',name,group,keyword,database,databaseId,region,...(authMode(input)==='accessKey'?{authMode:'accessKey'}:{profile})};
+  const profile=get('profile')||'dms-prod',region=get('region')||'cn-hangzhou';
+  if(!profileName(profile) || !/^[a-z]{2}-[a-z0-9-]{1,40}$/.test(region)) throw Error('Choose a valid Aliyun CLI profile and region.');
+  return {channel:'dms',name,group,region,...(authMode(input)==='accessKey'?{authMode:'accessKey'}:{profile})};
+}
+function dmsConfig(input) {
+  const {channel,name,group,region,...auth}=dmsIdentity(input);
+  const get=key=>typeof input[key]==='string' ? input[key].trim() : '';
+  const keyword=get('keyword'),database=get('database'),databaseId=get('databaseId');
+  if(!keyword || keyword.length>128 || !database || database.length>128 || /[\x00-\x1f]/.test(keyword+database) || !/^[1-9][0-9]{0,19}$/.test(databaseId)) throw Error('Enter the database name and verified numeric Database ID.');
+  return {channel,name,group,keyword,database,databaseId,region,...auth};
 }
 
 const authMode=connection=>connection.authMode??'profile';
 const isDmsAccount=connection=>connection?.channel==='dms' && authMode(connection)==='accessKey' && Array.isArray(connection.databases);
-function dmsAccountConfig(input) {
-  if(authMode(input)!=='accessKey' || !Array.isArray(input.databases) || !input.databases.length) throw Error('Choose one or more databases for this AccessKey connection.');
-  const seen=new Set();
+function dmsAccountConfig(input,{allowEmpty=false}={}) {
+  if(authMode(input)!=='accessKey' || !Array.isArray(input.databases) || (!input.databases.length && !allowEmpty)) throw Error('Choose one or more databases for this AccessKey connection.');
+  const identity=dmsIdentity(input),seen=new Set();
   const targets=input.databases.map(row=>{
     if(!row || typeof row!=='object' || Array.isArray(row)) throw Error('Choose one or more databases for this AccessKey connection.');
-    const target=dmsConfig({...input,...row,authMode:'accessKey'});
+    const target=dmsConfig({...identity,keyword:row.keyword,database:row.database,databaseId:row.databaseId});
     if(seen.has(target.databaseId)) throw Error('Each database can be added only once.');
     seen.add(target.databaseId);
     return {keyword:target.keyword,database:target.database,databaseId:target.databaseId};
   });
-  const {name,group,region}=dmsConfig({...input,...targets[0]});
-  return {channel:'dms',authMode:'accessKey',name,group,region,databases:targets};
+  return {...identity,databases:targets};
 }
 function dmsTargets(connection) {
   if(!isDmsAccount(connection)) return [connection];

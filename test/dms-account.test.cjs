@@ -19,3 +19,11 @@ test('database identities and revisions stay separate from the shared credential
   assert.ok(targets.every(c=>c.databases===undefined));
   assert.equal(dmsTargets({...multi,databases:[...multi.databases,{id:'third',keyword:'dim',database:'dim',databaseId:'44'}]})[0].revision,'r1');
 });
+
+test('only an existing account edit may keep its AK with an empty database list',()=>{
+  const empty={...account,databases:[]};
+  assert.throws(()=>dmsAccountConfig(empty));
+  assert.deepEqual(dmsAccountConfig(empty,{allowEmpty:true}),empty);
+  assert.deepEqual(dmsTargets({...empty,id:'owner',revision:'r1'}),[]);
+  for(const input of [{...empty,name:''},{...empty,region:'--bad'},{...empty,authMode:'profile'}])assert.throws(()=>dmsAccountConfig(input,{allowEmpty:true}));
+});

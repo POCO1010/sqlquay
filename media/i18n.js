@@ -5,6 +5,11 @@
   else window.SQLQuayI18n=api;
 })(()=>{
   const messages={
+    "Choose a database under this DMS connection.": "请选择这条 DMS 连接下的具体数据库。",
+    "The database selection changed. Reopen the connection and choose the databases again.": "数据库选择已变化，请重新打开连接并选择数据库。",
+    "Remove {0} from this connection": "从此连接移除 {0}",
+    "No databases selected. Save to keep this connection and its authentication.": "未选择数据库，保存后仅保留连接和认证。",
+    "Saving removes {0} databases from this connection. Files bound to them will need another connection.": "保存后将从此连接移除 {0} 个库；相关文件需重新选择连接。",
     "Choose one or more databases for this AccessKey connection.": "请为这套 AccessKey 选择一个或多个数据库。",
     "Each database can be added only once.": "同一个数据库只能添加一次。",
     "Choose an AccessKey DMS connection from the Database tree.": "请在数据库侧栏选择使用 AccessKey 的 DMS 连接。",
