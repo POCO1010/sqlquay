@@ -15,15 +15,15 @@ function create(language='en') {
     contains(target){return this===target || this.children.includes(target);}
   }
   const get=id=>{if(!ids.has(id))ids.set(id,new Element());return ids.get(id);};
-  for(const name of ['name','group','channel','engine','host','port','user','password','database','sslMode','authMode','region','accessKeyId','accessKeySecret','keyword','profile','schema','databaseId','searchHint']) fields[name]=Object.assign(new Element(),{name});
-  for(const [key,value] of Object.entries({channel:'jdbc',engine:'mysql',port:'3306',sslMode:'VERIFY_IDENTITY',authMode:'accessKey',region:'cn-hangzhou'}))fields[key].value=value;
+  for(const name of ['name','group','channel','engine','host','port','user','password','database','sslMode','authMode','region','accessKeyId','accessKeySecret','keyword','profile','schema','databaseId','searchHint','environment','dmsEngine']) fields[name]=Object.assign(new Element(),{name});
+  for(const [key,value] of Object.entries({channel:'jdbc',engine:'mysql',port:'3306',sslMode:'VERIFY_IDENTITY',authMode:'accessKey',region:'cn-hangzhou',environment:'product'}))fields[key].value=value;
   ids.set('dms-database-input',fields.keyword);
   get('dms-database-control').children=[fields.keyword,get('dms-search')];
-  const form=get('connection');form.elements=fields;form.querySelectorAll=()=>[fields.name,fields.group];
+  const form=get('connection');form.elements=fields;form.querySelectorAll=()=>[fields.name,fields.group];form.querySelector=()=>get('connect-submit');
   form.addEventListener=(name,fn)=>events[name]=fn;
   const document={documentElement:{lang:language},body:{dataset:{view:'connect'}},getElementById:get,createElement:()=>new Element(),addEventListener:(name,fn)=>listeners[name]=fn};
   class FormData {
-    constructor(){const names=['name','group','region',...(fields.channel.value==='dms'?(fields.authMode.value==='accessKey'?['keyword','accessKeyId','accessKeySecret']:['profile','schema','databaseId','searchHint']):['engine','host','port','user','password','database','sslMode'])];this.entries=names.map(name=>[name,fields[name].value]);}
+    constructor(){const names=['name','group','region',...(fields.channel.value==='dms'?(fields.authMode.value==='accessKey'?['keyword','accessKeyId','accessKeySecret']:['profile','schema','databaseId','searchHint','environment','dmsEngine']):['engine','host','port','user','password','database','sslMode'])];this.entries=names.map(name=>[name,fields[name].value]);}
     [Symbol.iterator](){return this.entries[Symbol.iterator]();}
   }
   const context=vm.createContext({document,window:{addEventListener:(name,fn)=>events[name]=fn},FormData,Option:class {constructor(text,value){this.textContent=text;this.value=value;}},acquireVsCodeApi:()=>({postMessage:m=>sent.push(JSON.parse(JSON.stringify(m)))})});
@@ -35,6 +35,8 @@ function create(language='en') {
 }
 const rows=[{database:'sandbox',databaseId:'42',label:'sandbox · Demo · mysql · #42'},{database:'sandbox',databaseId:'43',label:'sandbox · Other · mysql · #43'}];
 test('connection form has one database search with native multi-selection and no fake tabs',()=>{
+  const source=connectHtml({language:'en',csp:"'self'",css:'a',script:'b',i18n:'c',icon:'d'});
+  assert.deepEqual([...source.matchAll(/name="engine" value="([^"]+)"/g)].map(m=>m[1]),['mysql','polardb','drds','doris']);
   const assets={language:'zh-cn',csp:"'self'",css:'a',script:'b',i18n:'c',icon:'d'};
   const html=connectHtml(assets);
   assert.doesNotMatch(html,/config-tabs|搜索关键词/);
@@ -43,6 +45,11 @@ test('connection form has one database search with native multi-selection and no
   assert.match(html,/type="checkbox" id="dms-select-all"/);
   assert.equal((html.match(/name="keyword"/g)||[]).length,1);
   assert.match(resultHtml(assets),/class="tab active" id="mode"/);
+  for(const [language,connect,save] of [['en','＋ Connect','Save and open'],['zh-cn','＋ 连接','保存并打开']]) {
+    const view=create(language);assert.equal(view.get('connect-submit').textContent,connect);
+    view.change('channel','dms');assert.equal(view.get('connect-submit').textContent,save);
+    view.change('authMode','profile');assert.equal(view.get('connect-submit').textContent,connect);
+  }
 });
 test('search multi-select and later searches retain exact targets and their own lookup names',()=>{
   const view=create();view.change('channel','dms');view.input('keyword','sand');
@@ -119,4 +126,28 @@ test('saved databases can be explicitly removed, including all, without losing a
   view.receive({type:'error',message:'Offline save failure'});assert.equal(view.get('dms-selected-databases').children.length,1);
   view.get('dms-selected-databases').children[0].children.at(-1).onclick();view.submit();
   assert.deepEqual(view.sent.at(-1).values.databases,[]);assert.equal(view.sent.at(-1).values.removedDatabases.length,2);
+});
+
+
+test('instance browsing is lazy, paginated, environment-aware and retains AK and selection',()=>{
+  const view=create();view.change('channel','dms');view.fields.name.value='Shared';
+  view.input('accessKeyId','fixture-key-id');view.input('accessKeySecret','fixture-key-secret');
+  view.get('dms-environment-filter').value='test';view.get('dms-search').onclick();
+  assert.equal(view.sent.at(-1).type,'listDmsInstances');assert.equal(view.sent.at(-1).values.environment,'test');
+  const instance={instanceId:'7',instanceName:'Test warehouse',engine:'selectdb',environment:'test'};
+  view.receive({type:'dmsInstances',instances:[instance],page:1,more:true});
+  assert.equal(view.sent.filter(m=>m.type==='listDmsDatabases').length,0);
+  view.get('dms-instances').children[0].children[0].onclick();
+  assert.equal(view.sent.at(-1).type,'listDmsDatabases');assert.equal(view.sent.at(-1).values.instanceId,'7');
+  const row={...instance,database:'sandbox',databaseId:'42',keyword:'sandbox',label:'sandbox · Test warehouse · test · selectdb'};
+  view.receive({type:'dmsDatabases',instance,databases:[row],page:1,more:true});view.check(0,true);
+  view.get('dms-more-databases').onclick();assert.equal(view.sent.at(-1).values.page,2);
+  view.receive({type:'dmsDatabases',instance,databases:[{...row,database:'orders',databaseId:'43',keyword:'orders'}],page:2,more:false});
+  assert.equal(view.get('dms-database-options').children.length,2);view.check(1,true);
+  view.submit();const values=view.sent.at(-1).values;
+  assert.equal(values.databases.length,2);assert.equal(values.databases[0].environment,'test');assert.equal(values.databases[0].instanceId,'7');
+  assert.equal(values.accessKeyId,'fixture-key-id');assert.equal(values.accessKeySecret,'fixture-key-secret');
+  view.receive({type:'error',message:'fixture save error'});view.get('dms-search').onclick();
+  view.receive({type:'dmsInstances',instances:[instance],page:1,more:false});
+  assert.equal(view.get('dms-instances').children.length,1);assert.equal(view.get('dms-selected-databases').children.length,2);
 });

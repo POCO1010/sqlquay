@@ -11,6 +11,10 @@ from threading import Thread
 import time
 
 
+sys.path.insert(0, str(Path(__file__).resolve().parent.parent / "policy"))
+from engine_policy import drds_rows, drds_timeout
+
+
 class Refused(Exception):
     pass
 
@@ -20,7 +24,7 @@ class Unknown(Exception):
 
 
 def policy(guard, engine, sql):
-    if re.search(r"/\*\s*(?:M)?!|/\*\+", sql, re.I):
+    if re.search(r"/\*\s*(?:M)?!|/\*\+|/\*\s*(?:TDDL|DRDS)\s*:", sql, re.I):
         raise Refused("Executable comments and optimizer hints are not supported.")
     text = guard.mask_string_literals(guard.strip_comments(sql), mask_backticks=True)
     if re.search(r"\b(?:FOR|LOCK|INTO|GET_LOCK|RELEASE_LOCK|RELEASE_ALL_LOCKS|SLEEP|BENCHMARK|LOAD_FILE)\b", text, re.I):
@@ -49,11 +53,21 @@ def governed(guard, engine, check, run, limit):
         return [dict(zip(columns, row)) for row in result["rows"]]
 
     if check["preflight_required"]:
-        if engine == "mysql":
+        if engine in {"mysql", "polardb", "drds"}:
             for table in check["tables"]:
                 indexes = as_records(run("SHOW INDEX FROM " + guard.quote_table(table), 10000))
                 if not guard.indexed_scope_columns(indexes, check["index_candidates"].get(table, [])):
                     raise Refused("A bounded predicate must use a verified leading index.")
+        if engine == "drds":
+            if len(check["tables"]) != 1:
+                raise Refused("DRDS preflight supports one physical table at a time.")
+            try:
+                rows = drds_rows(check["sql"], lambda sql: as_records(run(sql, 10000)))
+            except ValueError as exc:
+                raise Refused(str(exc)) from exc
+            if rows > check["max_estimated_rows"]:
+                raise Refused("DRDS physical scan estimate exceeds the scan limit.")
+            return run(drds_timeout(check["sql"]), limit)
         plan = as_records(run(guard.explain_sql(check["sql"]), 10000))
         if engine == "doris":
             scans = re.findall(r"\b\w*ScanNode\b", str(plan), re.I)
@@ -102,7 +116,7 @@ def exchange(proc, request, operation):
         if reply.get("error") == "sql":
             state = reply.get("state", "")
             code = reply.get("code", 0)
-            if may_have_executed and (not state or state.startswith(("08", "HYT")) or code in (1317, 3024)):
+            if may_have_executed and (reply.get("timeout") is True or not state or state.startswith(("08", "HYT")) or code in (1317, 3024, 4202, 4203)):
                 raise Unknown()
             raise Refused(f"JDBC SQLSTATE {state or 'unknown'} ({code}).")
         if reply.get("error") == "driver":
@@ -141,7 +155,7 @@ def main():
         timings["connect"] = (time.perf_counter() - connect_start) * 1000
 
         def run(sql, limit):
-            final = sql.startswith("SELECT /*+ ") if is_preview else sql == check["sql"]
+            final = guard.first_token(sql) == "select" if is_preview else guard.strip_comments(sql).strip() == check["sql"]
             phase = "execute" if final else "preflight"
             start = time.perf_counter()
             try:

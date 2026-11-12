@@ -53,16 +53,21 @@ async function main(){
    assert.equal(await ak.locator('.config-tabs').count(),0);
    await ak.getByLabel('AccessKey ID',{exact:true}).fill('fixture-key-id');
    await ak.getByLabel('AccessKey Secret',{exact:true}).fill('fixture-key-secret');
-   const database=ak.getByRole('searchbox',{name:'Database',exact:true});
+   const database=ak.getByRole('searchbox',{name:'Instance',exact:true});
    await database.fill('sand');await database.press('Enter');
    assert.equal((await ak.evaluate(()=>window.sent.at(-1))).values.keyword,'sand');
-   await dispatch(ak,{type:'dmsDatabases',databases:[{database:'sandbox',databaseId:'42',label:'sandbox · Demo · #42'},{database:'orders',databaseId:'43',label:'orders · Demo · #43'}]});
-   await ak.getByRole('checkbox',{name:'Select all matches'}).check();
+   assert.equal((await ak.evaluate(()=>window.sent.at(-1))).type,'listDmsInstances');
+   const instance={instanceId:'7',instanceName:'Demo',engine:'mysql',environment:'test'};
+   await dispatch(ak,{type:'dmsInstances',instances:[instance],page:1,more:false});
+   await ak.getByRole('button',{name:/Demo · Test · MySQL$/}).click();
+   assert.equal((await ak.evaluate(()=>window.sent.at(-1))).type,'listDmsDatabases');
+   await dispatch(ak,{type:'dmsDatabases',instance,databases:[{...instance,keyword:'sandbox',database:'sandbox',databaseId:'42'},{...instance,keyword:'orders',database:'orders',databaseId:'43'}],page:1,more:false});
+   await ak.getByRole('checkbox',{name:'Select current page'}).check();
    assert.equal(await ak.getByLabel('AccessKey ID',{exact:true}).inputValue(),'fixture-key-id');
    assert.equal(await ak.getByLabel('AccessKey Secret',{exact:true}).inputValue(),'fixture-key-secret');
    await ak.getByRole('button',{name:'Save',exact:true}).click();
    const selected=(await ak.evaluate(()=>window.sent.at(-1))).values;
-   assert.deepEqual(selected.databases,[{keyword:'sand',database:'sandbox',databaseId:'42'},{keyword:'sand',database:'orders',databaseId:'43'}]);
+   assert.deepEqual(selected.databases,[{keyword:'sandbox',database:'sandbox',databaseId:'42',...instance},{keyword:'orders',database:'orders',databaseId:'43',...instance}]);
    await dispatch(ak,{type:'error',message:'Offline'});await database.fill('different');
    assert.equal(await ak.getByLabel('AccessKey Secret',{exact:true}).inputValue(),'fixture-key-secret');
    await ak.getByRole('button',{name:'Save',exact:true}).click();
@@ -88,7 +93,7 @@ async function main(){
    }
    await dms.getByRole('button',{name:'Connect'}).click();
    assert.deepEqual((await dms.evaluate(()=>window.sent.at(-1))).values,{
-     channel:'dms',authMode:'profile',profile:'team-fixture',region:'cn-beijing',name:'DMS fixture',group:'',keyword:'fixture',database:'fixture',databaseId:'42'
+     channel:'dms',authMode:'profile',profile:'team-fixture',region:'cn-beijing',name:'DMS fixture',group:'',keyword:'fixture',database:'fixture',databaseId:'42',environment:'product'
    });
    await dispatch(dms,{type:'error',message:'Target not found.'});
    assert.equal(await dms.locator('#feedback').textContent(),'Target not found.');

@@ -30,7 +30,7 @@ test('real local AK runner isolates CLI files and environment; search, query and
   const before={...process.env},project=path.join(temp,'project'),log=path.join(temp,'calls.jsonl');
   t.after(()=>{for(const key of Object.keys(process.env)) if(!Object.hasOwn(before,key)) delete process.env[key];Object.assign(process.env,before);fs.rmSync(temp,{recursive:true,force:true});});
   for(const dir of ['src','scripts','policy']) fs.mkdirSync(path.join(project,dir),{recursive:true});
-  for(const file of ['src/dms.cjs','src/jdbc.cjs','src/query.cjs','scripts/dms_ak.py','scripts/dms_timed.py','scripts/preview_safe.py','policy/execute_safe.py','policy/query_guard.py']) fs.copyFileSync(path.join(root,file),path.join(project,file));
+  for(const file of ['src/dms.cjs','src/jdbc.cjs','src/query.cjs','scripts/dms_ak.py','scripts/dms_catalog.py','scripts/dms_timed.py','scripts/preview_safe.py','policy/execute_safe.py','policy/query_guard.py','policy/engine_policy.py']) fs.copyFileSync(path.join(root,file),path.join(project,file));
   fs.appendFileSync(path.join(project,'policy/query_guard.py'),"\nfrom functools import partial\nsingle_query_lock=partial(single_query_lock,path=Path(__file__).parent/'fixture.lock')\n");
   const python=execFileSync('python3',['-c','import sys;print(sys.executable)'],{encoding:'utf8'}).trim();
   fs.writeFileSync(path.join(temp,'aliyun'),'#!'+python+'\n'+String.raw`
@@ -62,6 +62,14 @@ if a[:2]==['configure','ai-mode']:
  (config.parent/'ai-mode.json').write_text(json.dumps({'enabled':a[2]!='disable'}));sys.exit(0)
 assert a[0]=='dms-enterprise'
 assert a[a.index('--region')+1]=='cn-beijing'
+instances=[dict(InstanceId=str(i+7),InstanceAlias='Fixture '+str(i),InstanceType=kind,EnvType=env,State='NORMAL') for i,(kind,env) in enumerate([('mysql','product'),('polardb','dev'),('drds','pre'),('selectdb','test'),('ots','product')])]
+if a[1]=='list-instances':
+ assert '--cli-query' in a
+ print(json.dumps({'Success':True,'TotalCount':101,'InstanceList':{'Instance':instances}}));sys.exit(0)
+if a[1]=='list-databases':
+ identity=a[a.index('--instance-id')+1];instance=next(x for x in instances if x['InstanceId']==identity)
+ row=dict(SchemaName='sandbox',DatabaseId=str(420+int(identity)),InstanceId=identity,DbType=instance['InstanceType'],EnvType=instance['EnvType'],State='NORMAL')
+ print(json.dumps({'Success':True,'TotalCount':1,'DatabaseList':{'Database':[row]}}));sys.exit(0)
 if a[1]=='search-database':
  if os.environ.get('SQLQUAY_FIXTURE_FAIL')=='search':print('fixture-key-secret',file=sys.stderr);sys.exit(1)
  print(json.dumps({'Success':True,'TotalCount':101,'SearchDatabaseList':{'SearchDatabase':[
@@ -74,7 +82,17 @@ s=a[a.index('--script')+1]
 if s=='SELECT 1 AS timeout_probe':
  print(json.dumps({'Results':[{'Success':False,'Message':'execute script timeout'}]}));sys.exit(0)
 elif s=='SELECT 1 AS probe':rows=[{'probe':'1'}]
-elif s.startswith('SHOW CREATE TABLE'):rows=[{'Table':'products','Create Table':'CREATE TABLE products (id BIGINT) ENGINE=InnoDB'}]
+elif s=='SHOW FULL TABLES':rows=[{'Tables_in_sandbox':'products','Table_type':'BASE TABLE'}]
+elif s.startswith('SHOW CREATE TABLE'):rows=[{'Table':'products','Create Table':'CREATE TABLE products (id BIGINT)'}]
+elif s.startswith('SHOW INDEX'):rows=[{'Key_name':'PRIMARY','Column_name':'id','Seq_in_index':1}]
+elif s.startswith('EXPLAIN SHARDING'):
+ assert 'LIMIT 100' not in s;rows=[{'SHARD_COUNT':2 if 'multi_shard' in s else 1}]
+elif s.startswith('EXPLAIN EXECUTE'):rows=[{'rows':100001 if 'large' in s else 100000}]
+elif s.startswith('/*TDDL:SOCKET_TIMEOUT=5000*/'):
+ assert 'password' not in s
+ if 'drds_timeout' in s:
+  print(json.dumps({'Results':[{'Success':False,'Message':'ERR_SQL_QUERY_TIMEOUT'}]}));sys.exit(0)
+ rows=[{'id':'1'}]
 elif s.startswith('DESCRIBE'):rows=[{'Field':'id','Type':'BIGINT'},{'Field':'password','Type':'varchar(255)'}]
 elif s.startswith('EXPLAIN'):rows=[{'rows':100001 if 'large' in s else 2}]
 elif s.startswith('SELECT /*+'):
@@ -85,7 +103,7 @@ print(json.dumps({'Results':[{'Success':True,'Rows':rows}]}))
   Object.assign(process.env,{PATH:temp+path.delimiter+before.PATH,SQLQUAY_FIXTURE_LOG:log,ALIBABACLOUD_ACCESS_KEY_ID:'not-used',ALIBABA_CLOUD_ENDPOINT:'https://not-used.invalid',DEBUG:'sdk'});
   const local=require(path.join(project,'src/dms.cjs'));
   const found=await local.searchDmsDatabases({python},target,auth);
-  assert.deepEqual(found,{databases:[{database:'sandbox',databaseId:'42',engine:'mysql',label:'sandbox · Sample · mysql · #42'}],more:true});
+  assert.deepEqual(found,{databases:[{database:'sandbox',databaseId:'42',engine:'mysql',environment:'product',label:'sandbox · Sample · mysql · #42'},{database:'sandbox',databaseId:'43',engine:'mysql',environment:'test',label:'sandbox · mysql · #43'}],more:true});
   const query=local.makeDms({python,wrapper:'/not-used/execute_safe.py'});
   assert.deepEqual((await query(target,'SELECT 1 AS probe',200,undefined,auth)).rows,[['1']]);
   const sample=await query(target,undefined,100,'products',auth);
@@ -98,6 +116,32 @@ print(json.dumps({'Results':[{'Success':True,'Rows':rows}]}))
   assert.equal(entries.filter(row=>row.operation[0]==='configure'&&row.operation[2]==='disable').length,5);
   for(const row of entries)assert.ok(!fs.existsSync(path.dirname(row.config)));
   assert.ok(!fs.readFileSync(log,'utf8').includes(auth.accessKeySecret));
+  const inventory=await local.dmsCatalog({python},{kind:'instances',region:'cn-beijing',keyword:'',page:1},auth);
+  assert.deepEqual(inventory.instances.map(i=>[i.engine,i.environment]),[['mysql','product'],['polardb','dev'],['drds','pre'],['selectdb','test'],['ots','product']]);
+  assert.equal(inventory.more,true);assert.equal(inventory.page,1);
+  const filtered=await local.dmsCatalog({python},{kind:'instances',region:'cn-beijing',keyword:'',page:1,environment:'test'},auth);
+  assert.deepEqual(filtered.instances.map(i=>i.engine),['selectdb']);
+  const libraries=await local.dmsCatalog({python},{kind:'databases',region:'cn-beijing',...inventory.instances[4],keyword:'',page:1},auth);
+  assert.equal(libraries.databases[0].engine,'ots');assert.equal(libraries.databases[0].instanceId,'11');
+  assert.ok(!JSON.stringify(libraries).includes('DatabasePassword'));assert.ok(!JSON.stringify(libraries).includes(auth.accessKeyId));
+  const drdsLibrary=await local.dmsCatalog({python},{kind:'databases',region:'cn-beijing',...inventory.instances[2],keyword:'',page:1},auth);
+  const drds={...target,...drdsLibrary.databases[0]};
+  assert.deepEqual((await query(drds,'SELECT id FROM products WHERE id=1 LIMIT 1',200,undefined,auth)).rows,[['1']]);
+  const drdsPreview=await query(drds,undefined,100,'products',auth);assert.deepEqual(drdsPreview.rows,[['1']]);
+  assert.ok(drdsPreview.timings.preflight>0 && drdsPreview.timings.execute>0);
+  await assert.rejects(query(drds,'SELECT id AS multi_shard FROM products WHERE id=1 LIMIT 1',200,undefined,auth),/scan budget/);
+  await assert.rejects(query(drds,'SELECT id FROM products WHERE id=1 LIMIT 1',200,'large',auth),/scan limit/);
+  await assert.rejects(query(drds,'SELECT id AS drds_timeout FROM products WHERE id=1 LIMIT 1',200,undefined,auth),local.DmsStopped);
+  assert.equal(calls().filter(x=>x.script.startsWith('/*TDDL:') && x.script.includes('drds_timeout')).length,1);
+  assert.ok(!calls().some(x=>x.script.startsWith('/*TDDL:') && /large|multi_shard/.test(x.script)));
+  const ots={...target,...libraries.databases[0]};
+  assert.deepEqual((await query(ots,'SHOW TABLES',10000,undefined,auth)).rows,[['products','BASE TABLE']]);
+  assert.deepEqual((await query(ots,'SHOW CREATE TABLE `products`',1,undefined,auth)).rows,[['products','CREATE TABLE products (id BIGINT)']]);
+  assert.deepEqual((await query(ots,'DESCRIBE `products`',10000,undefined,auth)).rows[0],['id','BIGINT']);
+  assert.ok(calls().some(x=>x.script==='SHOW FULL TABLES'));
+  const dataBefore=calls().filter(x=>x.operation[1]==='execute-script').length;
+  await assert.rejects(query({...target,...libraries.databases[0]},'SELECT id FROM products WHERE id=1 LIMIT 1',200,undefined,auth),/Tablestore/);
+  assert.equal(calls().filter(x=>x.operation[1]==='execute-script').length,dataBefore);
   process.env.SQLQUAY_FIXTURE_FAIL='search';
   await assert.rejects(local.searchDmsDatabases({python},target,auth),error=>!error.message.includes(auth.accessKeySecret) && /search failed/.test(error.message));
   process.env.SQLQUAY_FIXTURE_FAIL='cleanup';

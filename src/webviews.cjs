@@ -23,7 +23,7 @@ function connectHtml(assets) {
 </div>
 </fieldset>
 <fieldset id="jdbc-fields">
-<section class="engines dialects"><p>${h("Server Type")}</p><div role="group" aria-label="${h("Server type")}"><label class="engine"><input type="radio" name="engine" value="mysql" checked> MySQL</label><label class="engine"><input type="radio" name="engine" value="doris"> Apache Doris / SelectDB</label></div></section>
+<section class="engines dialects"><p>${h("Server Type")}</p><div role="group" aria-label="${h("Server type")}"><label class="engine"><input type="radio" name="engine" value="mysql" checked> MySQL</label><label class="engine"><input type="radio" name="engine" value="polardb"> PolarDB MySQL</label><label class="engine"><input type="radio" name="engine" value="drds"> PolarDB-X / DRDS</label><label class="engine"><input type="radio" name="engine" value="doris"> Apache Doris / SelectDB</label></div></section>
 <div class="fields">
 <label>${h("Host")} <input required name="host" placeholder="db.example.com" maxlength="253"></label>
 <label>${h("Port")} <input required name="port" type="number" min="1" max="65535" value="3306"></label>
@@ -51,18 +51,23 @@ function connectHtml(assets) {
 <p class="subdued hint" id="dms-ak-status">${h('Keys stay in VS Code SecretStorage; no CLI account setup is required.')}</p>
 </fieldset>
 <fieldset id="dms-database-picker" class="hint">
-<div class="database-picker"><label for="dms-database-input">${h('Database')}</label><div id="dms-database-control">
-<input id="dms-database-input" name="keyword" type="search" maxlength="128" autocomplete="off" aria-describedby="dms-search-status" placeholder="${h('Enter all or part of the database name')}">
+<div class="database-picker"><label for="dms-database-input">${h('Instance')}</label><div id="dms-database-control">
+<input id="dms-database-input" name="keyword" type="search" maxlength="128" autocomplete="off" aria-describedby="dms-search-status" placeholder="${h('Instance name (optional)')}">
 <button type="button" id="dms-search" class="secondary">${h('Find')}</button>
 </div></div>
-<div id="dms-search-results" class="hint" hidden><label class="database-option"><input type="checkbox" id="dms-select-all">${h('Select all matches')}</label><div id="dms-database-options" role="group" aria-label="${h('Matching databases')}"></div></div>
+<div class="catalog-filters hint"><label>${h('Environment')} <select id="dms-environment-filter"><option value="">${h('All environments')}</option><option value="product">${h('Production')}</option><option value="test">${h('Test')}</option><option value="dev">${h('Development')}</option><option value="pre">${h('Pre-release')}</option><option value="sit">SIT</option><option value="uat">UAT</option><option value="pet">${h('Load test')}</option><option value="stag">${h('Staging')}</option></select></label>
+<label>${h('Engine')} <select id="dms-engine-filter"><option value="">${h('All engines')}</option><option value="mysql">MySQL</option><option value="polardb">PolarDB MySQL</option><option value="drds">PolarDB-X / DRDS</option><option value="selectdb">SelectDB</option><option value="doris">Doris</option><option value="ots">Tablestore</option></select></label></div>
+<div id="dms-instance-results" class="hint" hidden><div id="dms-instances" role="group" aria-label="${h('Instances')}"></div><button id="dms-more-instances" type="button" class="secondary" hidden>${h('Load more instances')}</button></div>
+<div id="dms-search-results" class="hint" hidden><p id="dms-instance-title" class="hint"></p><p id="dms-capability" class="subdued hint" hidden>${h('Tablestore: databases, tables and DDL only.')}</p><div id="dms-instance-search" class="instance-search"><input id="dms-database-filter" type="search" maxlength="128" placeholder="${h('Filter database names')}" aria-label="${h('Filter database names')}"><button id="dms-filter-databases" type="button" class="secondary">${h('Find databases')}</button></div><label class="database-option"><input type="checkbox" id="dms-select-all">${h('Select current page')}</label><div id="dms-database-options" role="group" aria-label="${h('Matching databases')}"></div><button id="dms-more-databases" type="button" class="secondary" hidden>${h('Load more databases')}</button></div>
 <div id="dms-selected" class="hint" hidden><p id="dms-selection-count" class="subdued" role="status"></p><ul id="dms-selected-databases" aria-label="${h('Selected databases')}"></ul></div>
 <p id="dms-removal-status" class="subdued hint" role="status" hidden></p>
-<p id="dms-search-status" class="subdued hint" role="status">${h('Search for databases and select one or more. Search again to add others.')}</p>
+<p id="dms-search-status" class="subdued hint" role="status">${h('Find instances, then expand one to choose databases. Leave the instance name blank to list all.')}</p>
 </fieldset>
 <fieldset id="dms-profile-fields" hidden disabled>
 <div class="fields hint">
 <label>${h("CLI profile")} <select required name="profile" aria-label="${h("Aliyun CLI profile")}"><option value="">${h("Choose a configured profile")}</option></select></label>
+<label>${h('Engine')} <select name="dmsEngine"><option value="">${h('Detect from DMS')}</option><option value="mysql">MySQL / RDS MySQL</option><option value="polardb">PolarDB MySQL</option><option value="drds">PolarDB-X / DRDS</option><option value="selectdb">SelectDB</option><option value="doris">Doris</option><option value="ots">Tablestore</option></select></label>
+<label>${h("Environment")} <select name="environment"><option value="product">${h("Production")}</option><option value="test">${h("Test")}</option><option value="dev">${h("Development")}</option><option value="pre">${h("Pre-release")}</option><option value="sit">SIT</option><option value="uat">UAT</option><option value="pet">${h("Load test")}</option><option value="stag">${h("Staging")}</option></select></label>
 <label>${h("Schema")} <input required name="schema" maxlength="128" placeholder="${h("Exact schema name")}"></label>
 <label>${h("Database ID")} <input required name="databaseId" inputmode="numeric" pattern="[1-9][0-9]{0,19}" maxlength="20" placeholder="${h("Verified DMS ID")}"></label>
 </div>

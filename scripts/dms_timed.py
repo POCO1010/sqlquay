@@ -6,7 +6,7 @@ import sys
 import time
 
 
-def instrument(safe, expected=None, *, profile=None, region=None):
+def instrument(safe, expected=None, *, profile=None, region=None, environment=None, instance_id=None):
     timings = {"connect": 0, "preflight": 0, "execute": 0}
     original = safe.SafeDmsExecutor
 
@@ -28,11 +28,28 @@ def instrument(safe, expected=None, *, profile=None, region=None):
         def enable_ai_mode(self):
             return measure("connect", super().enable_ai_mode)
 
+        def command_json(self, command, extra):
+            data = super().command_json(command, extra)
+            if command in {"search-database", "list-databases"} and hasattr(self, "_target_filter"):
+                from engine_policy import compatible_policy, engine_type
+                identity, schema = self._target_filter
+                rows = data.get("SearchDatabaseList", {}).get("SearchDatabase", []) if command == "search-database" else data.get("DatabaseList", {}).get("Database", [])
+                for row in rows:
+                    if isinstance(row, dict) and (not identity or str(row.get("DatabaseId")) == str(identity)) and (not schema or row.get("SchemaName") == schema):
+                        if not compatible_policy(safe, engine_type(row.get("DbType")), instance_id):
+                            raise safe.QueryRejectedError("External policy lacks required engine capabilities.")
+            return data
+
         def resolve_database(self, *args, **kwargs):
+            self._target_filter = (kwargs.get("database_id"), kwargs.get("schema"))
+            if environment is not None:
+                kwargs["environment"] = environment
+            if instance_id is not None:
+                kwargs["instance_id"] = instance_id
             return measure("connect", lambda: super(TimedExecutor, self).resolve_database(*args, **kwargs))
 
         def _execute_raw(self, target, sql):
-            final = sql.strip().rstrip(";") == expected if expected is not None else sql.startswith("SELECT /*+ ")
+            final = safe.strip_comments(sql).strip().rstrip(";") == safe.strip_comments(expected).strip().rstrip(";") if expected is not None else safe.first_token(sql) == "select"
             return measure("execute" if final else "preflight",
                            lambda: super(TimedExecutor, self)._execute_raw(target, sql))
 
@@ -49,14 +66,22 @@ def main():
     parser = argparse.ArgumentParser(add_help=False)
     parser.add_argument("--profile", default="dms-prod")
     parser.add_argument("--region", default="cn-hangzhou")
+    parser.add_argument("--environment")
+    parser.add_argument("--instance-id")
+    parser.add_argument("--engine")
     settings, remaining = parser.parse_known_args(sys.argv[1:])
     sys.argv[1:] = remaining
     if wrapper.name != "execute_safe.py" or not wrapper.is_file():
         raise ValueError("An installed execute_safe.py is required")
     sys.path.insert(0, str(wrapper.parent))
     import execute_safe as safe
+    sys.path.insert(0, str(Path(__file__).resolve().parent.parent / "policy"))
+    from engine_policy import compatible_policy
+    if not compatible_policy(safe, settings.engine, settings.instance_id):
+        print(json.dumps({"status":"configuration_error","reason":"policy_incompatible"}), file=sys.stderr)
+        return 2
     sql = next(arg.split("=", 1)[1] for arg in sys.argv if arg.startswith("--sql="))
-    timings = instrument(safe, sql.strip().rstrip(";"), profile=settings.profile, region=settings.region)
+    timings = instrument(safe, sql.strip().rstrip(";"), profile=settings.profile, region=settings.region, environment=settings.environment, instance_id=settings.instance_id)
     try:
         return safe.main()
     finally:

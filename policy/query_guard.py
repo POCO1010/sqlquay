@@ -35,12 +35,14 @@ ENGINE_ROW_LIMITS = {
     "mysql": 100_000,
     "rds": 100_000,
     "polardb": 100_000,
+    "drds": 100_000,
+    "ots": 100_000,
     "source": 100_000,
     "selectdb": 10_000_000,
     "doris": 10_000_000,
     "warehouse": 10_000_000,
 }
-DEFAULT_LOCK_PATH = Path("/tmp/sqlquay-read-query.lock")
+DEFAULT_LOCK_PATH = Path("/tmp/ahyk-production-read-query.lock")
 IDENT = r"[A-Za-z_][A-Za-z0-9_$]*"
 LITERAL = r"(?:'[^']*'|\"[^\"]*\"|-?\d+(?:\.\d+)?|DATE\s*'[^']*')"
 
@@ -464,6 +466,8 @@ def validate_sql(
     statements = split_statements(sql)
     violations: list[str] = []
     warnings: list[str] = []
+    if re.search(r"/\*\s*\+?\s*(?:TDDL|DRDS)\s*:", mask_string_literals(sql), re.I):
+        violations.append("User-supplied TDDL execution hints are not allowed.")
     if not statements:
         violations.append("SQL is empty.")
     if len(statements) > 1:
@@ -504,12 +508,14 @@ def validate_sql(
     if _has_cross_database_join(tables):
         violations.append("Cross-database JOIN/set queries are not allowed in the production query route.")
 
+    if engine.lower() == "ots" and not metadata_only:
+        violations.append("Tablestore supports databases, tables and DDL only. Data queries and previews require verified EXPLAIN support.")
     if tables and not metadata_only and not scopes:
         violations.append(
             "Production table queries require an explicit bounded time, partition, or business-key predicate; LIMIT is not a scan boundary."
         )
     if (
-        engine.lower() in {"mysql", "rds", "polardb", "source"}
+        engine.lower() in {"mysql", "rds", "polardb", "drds", "source"}
         and len(tables) > 1
         and scopes
         and not any(scope_index_candidates.values())
@@ -668,7 +674,7 @@ def indexed_scope_columns(index_rows: Any, scope_columns: list[str]) -> set[str]
 
 
 @contextlib.contextmanager
-def single_query_lock(
+def _file_lock(
     *,
     path: Path = DEFAULT_LOCK_PATH,
     wait_seconds: float = 0,
@@ -696,3 +702,14 @@ def single_query_lock(
             fcntl.flock(handle.fileno(), fcntl.LOCK_UN)
         finally:
             handle.close()
+
+
+@contextlib.contextmanager
+def single_query_lock(*, path: Path = DEFAULT_LOCK_PATH, wait_seconds: float = 0) -> Iterator[None]:
+    """Share the governed CLI lock and retain exclusion with SQLQuay 0.7 clients."""
+    with _file_lock(path=path, wait_seconds=wait_seconds):
+        if path == DEFAULT_LOCK_PATH:
+            with _file_lock(path=Path("/tmp/sqlquay-read-query.lock"), wait_seconds=wait_seconds):
+                yield
+        else:
+            yield

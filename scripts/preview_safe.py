@@ -6,6 +6,9 @@ import re
 import sys
 
 LIMIT = 100
+sys.path.insert(0, str(Path(__file__).resolve().parent.parent / "policy"))
+from engine_policy import drds_rows, drds_timeout, TABLESTORE_MESSAGE, compatible_policy
+
 WAREHOUSE = {"selectdb", "doris"}
 IDENTIFIER = re.compile(r"[\w$-]{1,128}")
 SENSITIVE = re.compile(
@@ -60,6 +63,8 @@ def scan_rows(engine, plan):
 
 
 def preview(guard, engine, schema, table, read, run):
+    if engine == "ots":
+        raise PreviewRefused(TABLESTORE_MESSAGE)
     relation = quote(schema) + "." + quote(table)
     definitions = list(fields(read("SHOW CREATE TABLE " + relation)))
     ddl = definitions[0].get("createtable") if len(definitions) == 1 else None
@@ -82,12 +87,16 @@ def preview(guard, engine, schema, table, read, run):
     if len(projection) > 48_000:
         raise PreviewRefused("Table projection is too wide to preview.")
     # LIMIT can cap cardinality; preflight the full scan instead.
-    estimate = scan_rows(engine, read("EXPLAIN SELECT " + projection))
+    try:
+        estimate = drds_rows("SELECT " + projection, read) if engine == "drds" else scan_rows(engine, read("EXPLAIN SELECT " + projection))
+    except ValueError as exc:
+        raise ScanUnknown(str(exc)) from exc
     ceiling = guard.ENGINE_ROW_LIMITS.get(engine)
     if estimate is None or ceiling is None or estimate > ceiling:
         raise ScanUnknown("Full-scan estimate is unknown or exceeds the scan limit.")
     hint = "SET_VAR(query_timeout=5)" if engine in WAREHOUSE else "MAX_EXECUTION_TIME(5000)"
-    return run(f"SELECT /*+ {hint} */ {projection} LIMIT {LIMIT}"), columns
+    statement = f"SELECT /*+ {hint} */ {projection} LIMIT {LIMIT}"
+    return run(drds_timeout(statement) if engine == "drds" else statement), columns
 
 
 def main():
@@ -96,12 +105,18 @@ def main():
         parser.add_argument("--" + option, required=True)
     parser.add_argument("--profile", default="dms-prod")
     parser.add_argument("--region", default="cn-hangzhou")
+    parser.add_argument("--environment")
+    parser.add_argument("--instance-id")
+    parser.add_argument("--engine")
     args = parser.parse_args()
     wrapper = Path(args.safe_wrapper).resolve()
     if wrapper.name != "execute_safe.py" or not wrapper.is_file():
         parser.error("An installed execute_safe.py is required")
     sys.path.insert(0, str(wrapper.parent))
     import execute_safe as safe
+    if not compatible_policy(safe, args.engine, args.instance_id):
+        print(json.dumps({"status":"configuration_error","reason":"policy_incompatible"}), file=sys.stderr)
+        return 2
     import query_guard as guard
     sys.path.insert(0, str(Path(__file__).resolve().parent))
     from dms_timed import instrument, report as report_timings
@@ -118,7 +133,10 @@ def main():
             executor = safe.SafeDmsExecutor(profile=args.profile, region=args.region, timeout=10)
             try:
                 executor.enable_ai_mode()
-                target = executor.resolve_database(args.database_keyword, schema=args.schema, database_id=args.db_id)
+                target_options = {}
+                if args.environment is not None: target_options["environment"] = args.environment
+                if args.instance_id is not None: target_options["instance_id"] = args.instance_id
+                target = executor.resolve_database(args.database_keyword, schema=args.schema, database_id=args.db_id, **target_options)
 
                 def read(sql):
                     try:

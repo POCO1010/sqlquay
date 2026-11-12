@@ -9,6 +9,7 @@ async function main() {
     const wrapper=path.join(temp,'execute_safe.py'), guard=path.join(temp,'query_guard.py'), log=path.join(temp,'calls');
     fs.copyFileSync(path.join(skill,'execute_safe.py'),wrapper);
     fs.copyFileSync(path.join(skill,'query_guard.py'),guard);
+    fs.copyFileSync(path.join(__dirname,'..','policy','engine_policy.py'),path.join(temp,'engine_policy.py'));
     fs.appendFileSync(guard,"\nfrom functools import partial\nsingle_query_lock = partial(single_query_lock, path=Path(__file__).parent / 'fixture.lock')\n");
     fs.writeFileSync(path.join(temp,'aliyun'),`#!${process.execPath}
 const fs=require('node:fs'),assert=require('node:assert/strict'),args=process.argv.slice(2);
@@ -81,7 +82,7 @@ console.log(JSON.stringify({Results:[{Success:true,Rows:rows}]}));
     const bounded=await query(target,'SELECT id FROM products WHERE id=2 LIMIT 1');
     assert.deepEqual(bounded.rows,[['2']]);
     for(const phase of ['connect','preflight','execute'])assert.ok(bounded.timings[phase]>0);
-    await assert.rejects(query({...target,databaseId:'43'},'SELECT 1 AS probe'),/product environment/);
+    await assert.rejects(query({...target,databaseId:'43'},'SELECT 1 AS probe'),/instance, environment/);
     await assert.rejects(query(target,'SELECT id FROM products WHERE id=1 LIMIT 1'),/scan budget/);
     await assert.rejects(query(target,'SELECT 1 AS timeout_probe'),DmsStopped);
     const sample=await query(target,undefined,100,'products');

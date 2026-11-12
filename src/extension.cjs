@@ -3,7 +3,7 @@ const vscode = require('vscode');
 const {randomUUID} = require('node:crypto');
 const {DEMO,demoQuery,pickSql,readonly,quoteTable} = require('./query.cjs');
 const {makeJdbc,UnknownState,connectionConfig} = require('./jdbc.cjs');
-const {makeDms,DmsStopped,dmsConfig,listDmsProfiles,accessKeyCredentials,searchConfig,searchDmsDatabases,authMode,dmsAccountConfig,dmsTargets,isDmsAccount} = require('./dms.cjs');
+const {makeDms,DmsStopped,dmsCatalog,targetMetadata,dmsConfig,listDmsProfiles,accessKeyCredentials,searchConfig,searchDmsDatabases,authMode,dmsAccountConfig,dmsTargets,isDmsAccount} = require('./dms.cjs');
 const {relationAt,tableDdl} = require('./ddl.cjs');
 const {languages,regionAt,selectedSql} = require('./embedded.cjs');
 const {suggestions,ddlColumns} = require('./completion.cjs');
@@ -15,11 +15,25 @@ const {translator}=require('../media/i18n.js');
 
 // Version 0.1.0 stored JDBC connections without a channel field.
 const channelOf = c => c.engine === 'demo' ? 'demo' : c.channel === 'dms' ? 'dms' : 'jdbc';
-const targetSignature = c => JSON.stringify([channelOf(c),c.engine,c.host,c.port,c.database,c.databaseId,c.sslMode??'VERIFY_IDENTITY',...(channelOf(c)==='dms' ? [authMode(c),c.profile??'dms-prod',c.region??'cn-hangzhou'] : [])]);
+const targetSignature = c => JSON.stringify([channelOf(c),channelOf(c)==='dms'?undefined:c.engine,c.host,c.port,c.database,c.databaseId,c.sslMode??'VERIFY_IDENTITY',...(channelOf(c)==='dms' ? [authMode(c),c.profile??'dms-prod',c.region??'cn-hangzhou'] : [])]);
 
 function activate(context) {
   const tr=translator(vscode.env?.language);
   const connectionName=c=>c.id==='demo' ? tr('Local Demo') : c.name;
+  const engineLabel=engine=>({mysql:'MySQL',rds:'RDS MySQL',polardb:'PolarDB MySQL',drds:'PolarDB-X / DRDS',doris:'Doris',selectdb:'SelectDB',ots:'Tablestore'}[engine]??'');
+  const environmentLabel=env=>tr({product:'Production',test:'Test',dev:'Development',pre:'Pre-release',sit:'SIT',uat:'UAT',pet:'Load test',stag:'Staging'}[env]??'');
+  const targetLabel=c=>[c.instanceName,environmentLabel(c.environment),engineLabel(c.engine)].filter(Boolean).join(' · ');
+  const relation=(c,table)=>c.engine==='ots'?quoteTable(table):quoteTable(c.database)+'.'+quoteTable(table);
+  const catalogPending=new Set(),catalogErrors=new Map();
+  const instanceNodes=account=>{
+    const groups=new Map();
+    for(const target of dmsTargets(account)) {
+      const key=target.instanceId??'legacy';
+      if(!groups.has(key)) groups.set(key,{kind:'dmsInstance',instanceId:key,label:target.instanceName??tr('Existing databases'),connection:account,targets:[]});
+      groups.get(key).targets.push(target);
+    }
+    return [...groups.values()];
+  };
   const channelLabel=c=>channelOf(c)==='demo' ? tr('offline') : channelOf(c)==='jdbc' && c.sslMode==='DISABLED' ? tr('JDBC · Unencrypted') : channelOf(c).toUpperCase();
   const modeLabel=mode=>({DATA:tr('Data'),PROPERTIES:tr('Properties'),PREVIEW:tr('Preview data')}[mode] ?? mode);
   const {window,workspace,commands,TreeItem,TreeItemCollapsibleState: State,ThemeIcon,Uri} = vscode;
@@ -59,13 +73,13 @@ function activate(context) {
   const workspaceDdlKey = 'ddlConnection:workspaceDefault';
   const workspaceDdl = () => context.workspaceState.get(workspaceDdlKey);
   const workspaceDdlCommand = 'setWorkspaceDdlConnection';
-  const branch = {connection:'database',schema:'symbol-namespace',tables:'folder',table:'table',column:'symbol-field',group:'folder',dmsAccount:'database',ddlDefault:'settings-gear'};
+  const branch = {connection:'database',schema:'symbol-namespace',tables:'folder',table:'table',column:'symbol-field',group:'folder',dmsAccount:'database',dmsInstance:'server',catalogStatus:'info',ddlDefault:'settings-gear'};
   const tree = {
     onDidChangeTreeData: changed.event,
     getTreeItem(node) {
-      const children = !(node.kind==='dmsAccount' && !node.connection.databases.length) && node.kind !== 'ddlDefault' && node.kind !== 'column' && (node.kind !== 'table' || columns.get(node.connection.id)?.has(node.label));
+      const children = !(node.kind==='dmsAccount' && !node.connection.databases.length) && node.kind !== 'ddlDefault' && node.kind !== 'column' && node.kind !== 'catalogStatus' && (node.kind !== 'table' || columns.get(node.connection.id)?.has(node.label));
       const item = new TreeItem(node.label,!children ? State.None : (node.connection?.engine === 'demo' && node.kind !== 'table') || node.kind === 'group' ? State.Expanded : State.Collapsed);
-      item.id = JSON.stringify([node.connection?.id,node.kind,node.table,node.label]);
+      item.id = JSON.stringify([node.connection?.id,node.kind,node.instanceId,node.table,node.label]);
       item.iconPath = new ThemeIcon(branch[node.kind]);
       item.contextValue = node.connection?.id === 'demo' && node.kind === 'connection' ? 'dbw-schema' : 'dbw-' + node.kind;
       if (node.kind === 'ddlDefault') {
@@ -82,6 +96,9 @@ function activate(context) {
         if(channelOf(node.connection)==='dms' && authMode(node.connection)==='accessKey') item.contextValue='dbw-akConnection';
       }
       if (node.kind === 'dmsAccount') item.description=tr('DMS · {0} databases',node.connection.databases.length);
+      if (node.kind === 'dmsInstance') item.description=[environmentLabel(node.targets[0].environment),engineLabel(node.targets[0].engine)].filter(Boolean).join(' · ') || tr('Instance metadata not yet loaded');
+      if (node.kind === 'schema' && node.connection.engine==='ots') item.description=tr('Schema browsing only');
+      if (node.kind === 'catalogStatus') item.command={command:'dbw.refresh',title:tr('Load / Refresh Tables'),arguments:[node]};
       if (node.kind === 'tables') item.description = tables.has(node.connection.id) ? String(tables.get(node.connection.id).length) : tr("Load tables ↗");
       if (node.kind === 'column') item.description = node.type;
       if (node.kind === 'table') item.command = {command:'dbw.describe',title:tr("Properties"),arguments:[node]};
@@ -91,7 +108,8 @@ function activate(context) {
       const c=node.connection;
       if(node.kind==='table') return {kind:'tables',label:tr("Tables"),connection:c};
       if(node.kind==='tables') return {kind:'schema',label:c.database,connection:c};
-      if(node.kind==='schema') return c.accountId ? {kind:'dmsAccount',label:c.name,connection:owner(c)} : {kind:'connection',label:connectionName(c),connection:c};
+      if(node.kind==='schema') return c.accountId ? instanceNodes(owner(c)).find(n=>n.targets.some(t=>t.id===c.id)) : {kind:'connection',label:connectionName(c),connection:c};
+      if(node.kind==='dmsInstance') return {kind:'dmsAccount',label:c.name,connection:c};
       if(['connection','dmsAccount'].includes(node.kind) && c.group) return {kind:'group',label:c.group};
     },
     getChildren(node) {
@@ -104,16 +122,27 @@ function activate(context) {
         return [...settings,...connections.filter(x=>!x.group).map(connectionNode),...groups.map(label=>({kind:'group',label}))];
       }
       if (node.kind === 'group') return saved().filter(x=>x.group===node.label).map(connectionNode);
-      if (node.kind === 'dmsAccount') return dmsTargets(c).map(connection=>({kind:'schema',label:connection.database,connection}));
+      if (node.kind === 'dmsAccount') return instanceNodes(liveConfigured(c));
+      if (node.kind === 'dmsInstance') return instanceNodes(liveConfigured(c)).find(n=>n.instanceId===node.instanceId)?.targets.map(connection=>({kind:'schema',label:connection.database,connection}))??[];
       if (node.kind === 'connection') return [{kind:'schema',label:c.database,connection:c}];
       if (node.kind === 'schema') return [{kind:'tables',label:tr("Tables"),connection:c}];
-      if (node.kind === 'tables') return (tables.get(c.id) ?? []).map(label=>({kind:'table',label,connection:c}));
+      if (node.kind === 'tables') {
+        if(!all().some(target=>target.id===c.id)) return [];
+        if(!tables.has(c.id)) return [{kind:'catalogStatus',label:catalogErrors.get(c.id)??tr(catalogPending.has(c.id)?'Loading tables…':'Expand to load tables'),connection:c}];
+        return tables.get(c.id).map(label=>({kind:'table',label,connection:c}));
+      }
       if (node.kind === 'table') return (columns.get(c.id)?.get(node.label) ?? []).map(([label,type])=>({kind:'column',label,type,table:node.label,connection:c}));
       return [];
     }
   };
   const treeView=window.createTreeView('dbw.explorer',{treeDataProvider:tree});
   context.subscriptions.push(changed,treeView);
+  const expanded=treeView.onDidExpandElement?.(({element})=>{
+    if(['schema','tables'].includes(element.kind) && !tables.has(element.connection.id) && !catalogPending.has(element.connection.id)) {
+      void loadCatalog(element.connection).catch(()=>{});
+    }
+  });
+  if(expanded) context.subscriptions.push(expanded);
 
   function register(name, callback) {
     context.subscriptions.push(commands.registerCommand('dbw.' + name, async (...args) => {
@@ -136,6 +165,7 @@ function activate(context) {
   const akSecretKey=id=>'dms-ak:'+id;
   async function dmsCredentialsFor(connection) {
     const raw=await context.secrets.get(akSecretKey(connection.accountId??connection.id));
+    if(isDmsAccount(connection)) liveConfigured(connection); else live(connection);
     if(!raw) throw Error('Edit this DMS connection to enter its AccessKey.');
     try {return accessKeyCredentials(JSON.parse(raw));}
     catch {throw Error('Saved DMS credentials are unavailable. Re-enter the AccessKey.');}
@@ -202,7 +232,7 @@ function activate(context) {
     const bound=executionBinding(doc);
     let label=tr("Choose execution connection");
     if (bound) {
-      try { const c=live(bound); label=connectionName(c)+' / '+c.database+' · '+channelLabel(c); }
+      try { const c=live(bound); label=connectionName(c)+' / '+c.database+' · '+channelLabel(c)+(targetLabel(c)?' · '+targetLabel(c):''); }
       catch { label=tr("Connection changed; reselect"); }
     }
     connectionStatus.text='$(database) '+label;
@@ -214,11 +244,11 @@ function activate(context) {
     const options=all().filter(c=>(workspace.isTrusted || channelOf(c)==='demo') && (!schema || c.database===schema));
     if (!options.length) throw Error(tr("No preview connection matches this database. Add a connection first."));
     const items=[...options.filter(c=>c!==DEMO),...options.filter(c=>c===DEMO)].map(c=>({
-      label:connectionName(c),description:c.database + ' · ' + channelLabel(c) +
+      label:connectionName(c),description:c.database + ' · ' + channelLabel(c)+(targetLabel(c)?' · '+targetLabel(c):'') +
         (bindingSignature(c)===bindingSignature(current) ? tr(" · Selected") : ''),connection:c
     }));
     if (resetLabel) items.push({label:resetLabel,reset:true});
-    const choice=await window.showQuickPick(items,{title,placeHolder:schema ?? tr("Choose a JDBC or DMS connection")});
+    const choice=await window.showQuickPick(items,{title,matchOnDescription:true,placeHolder:schema ?? tr("Choose a JDBC or DMS connection")});
     if (!choice || doc?.isClosed) return;
     return choice.reset ? null : live(choice.connection);
   }
@@ -304,7 +334,7 @@ function activate(context) {
     const task=(async ()=>{
       let preview, fields;
       try {
-        const result=await query(connection,'SHOW CREATE TABLE ' + quoteTable(connection.database) + '.' + quoteTable(table),1);
+        const result=await query(connection,'SHOW CREATE TABLE ' + relation(connection,table),1);
         const ddl=tableDdl(result);
         preview={ddl:ddl.slice(0,ddlPreviewLimit),truncated:ddl.length>ddlPreviewLimit};
         fields=ddlColumns(ddl);
@@ -369,7 +399,7 @@ function activate(context) {
         else {
           body.appendCodeblock(preview.ddl,'sql');
           if (preview.truncated) body.appendText(tr("The table definition is truncated to the first 24,000 characters."));
-          return new vscode.Hover([heading,hoverLink(tr("Preview data"),previewCommand,doc,offset,bound),body],range);
+          return new vscode.Hover([heading,...(connection.engine==='ots'?[]:[hoverLink(tr("Preview data"),previewCommand,doc,offset,bound)]),body],range);
         }
       } else {
         if (executionBinding(doc)) {
@@ -388,6 +418,7 @@ function activate(context) {
       throw Error(tr("File or preview connection changed. Hover the table name again."));
     }
     const connection=live(bound);
+    if(connection.engine==='ots') throw Error('Tablestore supports databases, tables and DDL only. Data queries and previews require verified EXPLAIN support.');
     const part=region(doc,offset);
     const ref=part && relationAt(part.text,offset-part.start,connection.database);
     if (!ref || !ddlCache.get(ddlKey(connection,ref.table))?.ddl) throw Error(tr("Hover the table name again before previewing data."));
@@ -430,12 +461,12 @@ function activate(context) {
     const panel = window.createWebviewPanel('dbw.connect',edit ? tr('Edit {0}',edit.name) : tr("Connect to server"),vscode.ViewColumn.One,webOptions);
     formPanel=panel;
     let busy=false,disposed=false,draftAuth,savedAuth;
-    const verifiedSearch=new Map(),databaseKey=c=>JSON.stringify([c.databaseId,c.database]);
+    const verifiedSearch=new Map(),verifiedInstances=new Map(),databaseKey=c=>JSON.stringify([c.databaseId,c.database]);
     const formAuth=async values=>{
       if(values.accessKeyId || values.accessKeySecret) {
         const entered=accessKeyCredentials(values);
         if(!draftAuth || draftAuth.accessKeyId!==entered.accessKeyId || draftAuth.accessKeySecret!==entered.accessKeySecret) {
-          draftAuth=entered;verifiedSearch.clear();
+          draftAuth=entered;verifiedSearch.clear();verifiedInstances.clear();
         }
       }
       if(draftAuth) return draftAuth;
@@ -458,6 +489,35 @@ function activate(context) {
         return;
       }
       if(message.type==='openAccessKeyGuide') {void vscode.env.openExternal(Uri.parse('https://ram.console.aliyun.com/profile/access-keys'));return;}
+      if(['listDmsInstances','listDmsDatabases'].includes(message.type)) {
+        if(busy || !workspace.isTrusted || !message.values || typeof message.values!=='object') return;
+        busy=true;
+        try {
+          if(online || pendingChannel()) throw Error('Wait for the active query to finish.');
+          if(edit) liveConfigured(edit);
+          const values=message.values,auth=await formAuth(values),kind=message.type==='listDmsInstances'?'instances':'databases';
+          let instance;
+          if(kind==='databases') {
+            const verified=verifiedInstances.get(values.instanceId);
+            if(!verified || verified.auth!==auth || verified.region!==values.region) throw Error('Load the instance list with this AccessKey first.');
+            instance=verified;
+          }
+          online=true;
+          try {
+            await context.globalState.update('dmsPending',true);
+            const result=await dmsCatalog({python:cfg().get('pythonPath')},{...values,kind,...(instance?targetMetadata(instance):{})},auth);
+            if(!disposed && kind==='instances') for(const instance of result.instances) verifiedInstances.set(instance.instanceId,{...instance,auth,region:values.region});
+            if(!disposed && kind==='databases') for(const database of result.databases) verifiedSearch.set(databaseKey(database),{keyword:database.keyword,region:values.region,auth,database});
+            if(!disposed) await panel.webview.postMessage({type:kind==='instances'?'dmsInstances':'dmsDatabases',...result});
+            await context.globalState.update('dmsPending',false);
+          } catch(error) {
+            if(!(error instanceof DmsStopped)) await context.globalState.update('dmsPending',false);
+            throw error;
+          } finally {online=false;}
+        } catch(error) {if(!disposed) await panel.webview.postMessage({type:'error',message:tr(error.message)});}
+        finally {busy=false;}
+        return;
+      }
       if(message.type==='searchDmsDatabases') {
         if(busy || !workspace.isTrusted || !message.values || typeof message.values!=='object') return;
         busy=true;
@@ -471,7 +531,7 @@ function activate(context) {
             await context.globalState.update('dmsPending',true);
             try {
               const result=await searchDmsDatabases({python:cfg().get('pythonPath')},search,auth);
-              if(!disposed) for(const database of result.databases) verifiedSearch.set(databaseKey(database),{...search,auth});
+              if(!disposed) for(const database of result.databases) verifiedSearch.set(databaseKey(database),{...search,auth,database});
               if(!disposed) await panel.webview.postMessage({type:'dmsDatabases',...result});
               await context.globalState.update('dmsPending',false);
             } catch(error) {
@@ -543,12 +603,16 @@ function activate(context) {
             const verified=verifiedSearch.get(databaseKey(target));
             const selected=verified && verified.region===connection.region && verified.keyword===target.keyword && verified.auth===credentials;
             if(!sameSaved && !selected) throw Error('Search and select the database with this AccessKey first.');
+            const metadata=targetMetadata(selected ? verified.database : previous);
+            const row=multiple ? connection.databases.find(c=>databaseKey(c)===databaseKey(target)) : connection;
+            for(const field of ['instanceId','instanceName','engine','environment']) delete row[field];
+            Object.assign(row,metadata);
           }
         }
         const targetChanged=multiple ? edit && (edit.region??'cn-hangzhou')!==connection.region : edit && targetSignature(edit)!==targetSignature(connection);
         if (edit && (targetChanged || newUser || newAccessKey)) connection.revision=randomUUID();
         const targets=dmsTargets(connection),catalogs=new Map();
-        if(message.type==='connect') for(const target of targets) {
+        if(message.type==='connect' && !multiple) for(const target of targets) {
           if(disposed) return;
           if(edit) liveConfigured(edit);
           const catalog=await query(target,'SHOW TABLES',10000,credentials);
@@ -584,7 +648,7 @@ function activate(context) {
         if (!disposed) await panel.webview.postMessage({type:'error',message:tr(error.message)});
       } finally { busy=false; }
     });
-    panel.onDidDispose(()=>{disposed=true;draftAuth=savedAuth=undefined;verifiedSearch.clear();receive.dispose();if(formPanel===panel) formPanel=undefined;});
+    panel.onDidDispose(()=>{disposed=true;draftAuth=savedAuth=undefined;verifiedSearch.clear();verifiedInstances.clear();receive.dispose();if(formPanel===panel) formPanel=undefined;});
     panel.webview.html=connectHtml(assetPaths(panel.webview));
   }
 
@@ -606,11 +670,22 @@ function activate(context) {
     for(const target of dmsTargets(connection)) {tables.delete(target.id);columns.delete(target.id);clearDdl(target);if(activeId===target.id) activeId='demo';}
     changed.fire();setEditorContext();
   });
+  async function loadCatalog(connection) {
+    live(connection);
+    if(catalogPending.has(connection.id)) return;
+    catalogPending.add(connection.id);catalogErrors.delete(connection.id);changed.fire();
+    try {
+      const result=await query(connection,'SHOW TABLES',10000);
+      if(result.truncated) throw Error(tr('The table list exceeded the metadata display limit.'));
+      live(connection);tables.set(connection.id,tableNames(result));
+      if(connection.id!=='demo') columns.delete(connection.id);
+      clearDdl(connection);
+    } catch(error) {catalogErrors.set(connection.id,error.message);throw error;}
+    finally {catalogPending.delete(connection.id);changed.fire();}
+  }
   register('refresh',async node=>{
     const connection=getTarget(node);
-    const result=await window.withProgress({location:vscode.ProgressLocation.Notification,title:tr('Loading tables · {0}',connectionName(connection))},()=>query(connection,'SHOW TABLES',10000));
-    if(result.truncated) throw Error(tr("The table list exceeded the metadata display limit."));
-    live(connection); tables.set(connection.id,tableNames(result)); if(connection.id!=='demo') columns.delete(connection.id); clearDdl(connection); changed.fire();
+    return window.withProgress({location:vscode.ProgressLocation.Notification,title:tr('Loading tables · {0}',connectionName(connection))},()=>loadCatalog(connection));
   });
   register('newQuery',async node=>{
     const connection=getTarget(node);
@@ -696,7 +771,7 @@ function activate(context) {
     if(table===undefined) readonly(sql);
     const start=performance.now(), id=++serial;
     const entry=sessions.add({target:connection,view:{id,state:'running',sql,mode,
-      target:connectionName(connection)+' / '+connection.database+(channelOf(connection)==='demo'?'':' · '+channelLabel(connection))}});
+      target:connectionName(connection)+' / '+connection.database+(channelOf(connection)==='demo'?'':' · '+channelLabel(connection))+(targetLabel(connection)?' · '+targetLabel(connection):'')}});
     running=true;
     try {
       showResult(entry);publish(entry);

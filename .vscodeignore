@@ -12,6 +12,7 @@
 !scripts/preview_safe.py
 !scripts/dms_timed.py
 !scripts/dms_ak.py
+!scripts/dms_catalog.py
 !build/jdbc/**
 **/__pycache__/**
 **/*.pyc

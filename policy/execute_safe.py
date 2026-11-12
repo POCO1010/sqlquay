@@ -35,9 +35,13 @@ from query_guard import (
 )
 
 
+POLICY_CAPABILITIES = frozenset({"drds-single-shard-v1", "ots-schema-only-v1", "instance-target-v1"})
+
 PROFILE = "dms-prod"
 USER_AGENT = "AlibabaCloud-Agent-Skills/alibabacloud-dms-skill"
-SOURCE_ENGINES = {"mysql", "rds", "polardb", "source"}
+from engine_policy import engine_type, drds_rows, drds_timeout, timeout_message
+
+SOURCE_ENGINES = {"mysql", "rds", "polardb", "drds", "source"}
 
 
 @dataclass(frozen=True)
@@ -127,7 +131,7 @@ class SafeDmsExecutor:
         code, out, err = self.runner(args)
         if code != 0:
             message = err.strip() or out.strip() or "DMS CLI failed."
-            if args[:2] == ["dms-enterprise", "execute-script"] and "execute script timeout" in message.lower():
+            if args[:2] == ["dms-enterprise", "execute-script"] and timeout_message(message):
                 raise QueryStateUnknownError(
                     "DMS reported an execute-script timeout; the server-side statement state is unknown. "
                     "Stop the batch and inspect query audit before any retry."
@@ -177,22 +181,34 @@ class SafeDmsExecutor:
         schema: str | None = None,
         database_id: str | None = None,
         environment: str = "product",
+        instance_id: str | None = None,
     ) -> DatabaseTarget:
-        payload = self.command_json(
-            "search-database",
-            ["--search-key", search_key, "--page-number", "1", "--page-size", "100"],
-        )
-        rows = payload.get("SearchDatabaseList", {}).get("SearchDatabase", [])
-        candidates = [row for row in rows if isinstance(row, dict)]
-        if schema:
-            candidates = [row for row in candidates if row.get("SchemaName") == schema]
-        if database_id:
-            candidates = [row for row in candidates if str(row.get("DatabaseId")) == str(database_id)]
-        if environment:
-            candidates = [
-                row for row in candidates
-                if str(row.get("EnvType") or "").lower() == environment.lower()
-            ]
+        if instance_id and not re.fullmatch(r"[1-9][0-9]{0,19}", instance_id):
+            raise QueryRejectedError("Invalid DMS instance ID.")
+        command = "list-databases" if instance_id else "search-database"
+        keys = ("DatabaseList", "Database") if instance_id else ("SearchDatabaseList", "SearchDatabase")
+        options = ["--instance-id", instance_id, "--search-key", schema or search_key] if instance_id else ["--search-key", search_key]
+        candidates = []
+        for page in range(1, 10001):
+            payload = self.command_json(command, options + ["--page-number", str(page), "--page-size", "100"])
+            rows = payload.get(keys[0], {}).get(keys[1], [])
+            if payload.get("Success") is False or not isinstance(rows, list):
+                raise QueryRejectedError("Incomplete DMS database metadata.")
+            candidates.extend(row for row in rows if isinstance(row, dict)
+                and (not instance_id or str(row.get("InstanceId")) == instance_id)
+                and (not schema or row.get("SchemaName") == schema)
+                and (not database_id or str(row.get("DatabaseId")) == str(database_id))
+                and (not environment or str(row.get("EnvType") or "").lower() == environment.lower()))
+            try:
+                total = int(payload.get("TotalCount", len(rows)))
+            except (ValueError, TypeError) as exc:
+                raise QueryRejectedError("Invalid DMS metadata pagination.") from exc
+            if (database_id and candidates) or page * 100 >= total:
+                break
+            if not rows:
+                raise QueryRejectedError("Incomplete DMS metadata pagination.")
+        else:
+            raise QueryRejectedError("DMS metadata pagination limit reached.")
         if len(candidates) != 1:
             summary = ", ".join(
                 f"{row.get('DatabaseId')}:{row.get('SchemaName')}/{row.get('DbType')}/{row.get('EnvType')}"
@@ -203,17 +219,8 @@ class SafeDmsExecutor:
             )
         row = candidates[0]
         db_type = str(row.get("DbType") or "").lower()
-        if "selectdb" in db_type:
-            engine = "selectdb"
-        elif "doris" in db_type:
-            engine = "doris"
-        elif "polar" in db_type:
-            engine = "polardb"
-        elif "rds" in db_type:
-            engine = "rds"
-        elif "mysql" in db_type:
-            engine = "mysql"
-        else:
+        engine = engine_type(db_type)
+        if engine is None or row.get("Logic") is True:
             raise QueryRejectedError(f"Unsupported DMS database engine: {db_type or 'unknown'}")
         target = DatabaseTarget(
             database_id=str(row["DatabaseId"]),
@@ -239,7 +246,7 @@ class SafeDmsExecutor:
         results = payload.get("Results") or []
         if not results or not results[0].get("Success"):
             message = results[0].get("Message") if results else None
-            if message and "execute script timeout" in str(message).lower():
+            if message and timeout_message(message):
                 raise QueryStateUnknownError(
                     "DMS reported an execute-script timeout; the server-side statement state is unknown. "
                     "Stop the batch and inspect query audit before any retry."
@@ -431,6 +438,20 @@ class SafeDmsExecutor:
 
         if target.engine in SOURCE_ENGINES:
             self._verify_source_indexes(target, static)
+
+        if target.engine == "drds":
+            if len(static["tables"]) != 1:
+                raise QueryNeedsSplitError("DRDS preflight supports one physical table at a time.")
+            try:
+                estimated_rows = drds_rows(static["sql"], lambda sql: self._execute_raw(target, sql))
+            except ValueError as exc:
+                raise QueryNeedsSplitError(str(exc)) from exc
+            approved = validate_sql(static["sql"], engine=target.engine, estimated_rows=estimated_rows,
+                allow_select_star=allow_select_star, allow_sensitive_fields=allow_sensitive_fields,
+                max_estimated_rows=max_estimated_rows)
+            if not approved["execution_allowed"]:
+                raise QueryNeedsSplitError("DRDS physical scan estimate exceeds the scan limit.")
+            return self._execute_raw(target, drds_timeout(approved["sql"])), approved
 
         try:
             explain_statement = explain_sql(pilot_sql or static["sql"])

@@ -18,7 +18,7 @@ function pickSql(text, cursor, selection) {
   return range ? text.slice(...range).trim() : '';
 }
 function readonly(sql) {
-  if (typeof sql !== 'string' || sql.length > 48_000 || /\/\*\s*(?:M)?!/i.test(sql)) throw Error('Expected one read-only SQL statement (48 KB maximum).');
+  if (typeof sql !== 'string' || sql.length > 48_000 || /\/\*\s*(?:M)?!/i.test(sql) || [...sql.matchAll(sqlTokens)].some(m=>/^\/\*\s*\+?\s*(?:TDDL|DRDS)\s*:/i.test(m[0]))) throw Error('Expected one read-only SQL statement (48 KB maximum).');
   const units = slices(sql).map(([a,b]) => sql.slice(a,b).replace(leadingComments,'').replace(/;$/,'').trim()).filter(Boolean);
   if (units.length !== 1 || !/^(SELECT|WITH|SHOW|DESC|DESCRIBE|EXPLAIN)\b/i.test(units[0])) throw Error('Run one read-only statement at a time.');
   return units[0];

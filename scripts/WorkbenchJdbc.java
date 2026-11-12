@@ -64,7 +64,10 @@ public final class WorkbenchJdbc {
     private static String sqlError(SQLException error) {
         String state = error.getSQLState();
         if (state == null || !state.matches("[A-Z0-9]{5}")) state = "";
-        return "{\"error\":\"sql\",\"state\":" + json(state) + ",\"code\":" + error.getErrorCode() + "}";
+        int code = error.getErrorCode();
+        boolean timeout = error instanceof SQLTimeoutException || code == 4202 || code == 4203
+            || String.valueOf(error.getMessage()).matches("(?is).*(?:ERR_SQL_QUERY(?:_MERGE)?_TIMEOUT|TDDL[- :]?420[23]).*");
+        return "{\"error\":\"sql\",\"state\":" + json(state) + ",\"code\":" + code + ",\"timeout\":" + timeout + "}";
     }
 
     public static void main(String[] args) throws IOException {

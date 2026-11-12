@@ -14,6 +14,7 @@ async function main() {
     fs.writeFileSync(manifest,'Manifest-Version: 1.0\nImplementation-Version: 8.0.32\n\n');
     const jar=path.join(temp,'fixture.jar');
     execFileSync('jar',['cfm',jar,manifest,'-C',driver,'.']);
+    fs.mkdirSync(path.join(temp,'policy'));fs.copyFileSync(path.join(root,'policy','engine_policy.py'),path.join(temp,'policy','engine_policy.py'));
     for (const script of ['jdbc_guard.py','preview_safe.py']) fs.copyFileSync(path.join(root,'scripts',script),path.join(temp,'scripts',script));
     const original=process.env.DBW_TEST_GUARD || path.join(root,'policy','query_guard.py');
     const guard=path.join(temp,'query_guard.py');
@@ -30,6 +31,10 @@ async function main() {
     for(const phase of ['connect','preflight','execute']) assert.ok(accepted.timings[phase]>0,phase);
     assert.deepEqual(accepted.columns.map(c=>c.name),['same','same']);
     assert.deepEqual(accepted.rows,[['9007199254740993',null]]);
+    const drds={...connection,engine:'drds'};
+    assert.deepEqual((await query(drds,auth,'SELECT id FROM products WHERE id=1 LIMIT 1')).rows,[['1']]);
+    for(const alias of ['drds_timeout_vendor','drds_timeout_message']) await assert.rejects(query(drds,auth,'SELECT id AS '+alias+' FROM products WHERE id=1 LIMIT 1'),/may still be running/);
+    await assert.rejects(query(drds,auth,'SELECT id AS two_shards FROM products WHERE id=1 LIMIT 1'),/single-shard/);
     await assert.rejects(query(connection,auth,'SELECT id FROM products WHERE id = 999 LIMIT 1'),/estimate/);
     await assert.rejects(query(connection,auth,'SELECT id FROM products LIMIT 1'),/bounded/);
     await assert.rejects(query(connection,auth,'EXPLAIN ANALYZE SELECT 1'),/executes/);

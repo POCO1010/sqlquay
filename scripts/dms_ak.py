@@ -17,7 +17,7 @@ def report(reason):
 
 def main():
     operation = sys.argv.pop(1)
-    if operation not in {"search", "query", "preview"}:
+    if operation not in {"search", "query", "preview", "instances", "databases"}:
         return report("search_failed")
     try:
         auth = json.load(sys.stdin)
@@ -33,6 +33,8 @@ def main():
     sys.path.insert(0, str(scripts.parent / "policy"))
     import execute_safe as safe
     import query_guard as guard
+    from engine_policy import engine_type, ENVIRONMENTS
+    sys.path.insert(0, str(scripts))
     safe.USER_AGENT = "SQLQuay"
     env = {key: value for key, value in os.environ.items()
            if not key.startswith(("ALIBABA_CLOUD_", "ALIBABACLOUD_", "ALICLOUD_")) and key != "DEBUG"}
@@ -61,6 +63,42 @@ def main():
                 return report("plugin_missing")
         except safe.DmsSafeQueryError:
             return report("plugin_missing")
+        if operation in {"instances", "databases"}:
+            import argparse
+            from dms_catalog import catalog
+            parser = argparse.ArgumentParser()
+            parser.add_argument("--keyword", default="")
+            parser.add_argument("--region", required=True)
+            parser.add_argument("--profile", choices=["sqlquay"], required=True)
+            parser.add_argument("--instance-id")
+            parser.add_argument("--instance-name", default="")
+            parser.add_argument("--page", type=int, default=1)
+            parser.add_argument("--environment", default="", choices=["", *sorted(ENVIRONMENTS)])
+            parser.add_argument("--engine", default="", choices=["", "mysql", "rds", "polardb", "drds", "doris", "selectdb", "ots"])
+            args = parser.parse_args()
+            args.operation = operation
+            if not 1 <= args.page <= 10000 or len(args.keyword) > 128 or re.search(r"[\x00-\x1f]", args.keyword) or not re.fullmatch(r"[a-z]{2}-[a-z0-9-]{1,40}", args.region) or (operation == "databases" and not re.fullmatch(r"[1-9][0-9]{0,19}", args.instance_id or "")):
+                return report("search_failed")
+            try:
+                with guard.single_query_lock():
+                    executor.region = args.region
+                    try:
+                        executor.enable_ai_mode()
+                        result = catalog(executor, args)
+                    finally:
+                        try:
+                            executor._ai_mode_enabled = True
+                            executor.disable_ai_mode()
+                        except safe.DmsSafeQueryError:
+                            print(json.dumps({"status": "cleanup_failed"}), file=sys.stderr)
+                            raise
+                print(json.dumps(dict(status="success", **result), ensure_ascii=False))
+                return 0
+            except guard.QueryLockError:
+                print(json.dumps({"status":"query_in_flight"}), file=sys.stderr)
+                return 2
+            except (safe.DmsSafeQueryError, ValueError, TypeError, KeyError):
+                return report("search_failed")
         if operation == "search":
             import argparse
             parser = argparse.ArgumentParser()
@@ -80,17 +118,17 @@ def main():
                         rows = data.get("SearchDatabaseList", {}).get("SearchDatabase", [])
                         databases = []
                         for row in rows:
-                            if not isinstance(row, dict) or str(row.get("EnvType", "")).lower() != "product" or row.get("Logic") is True:
+                            if not isinstance(row, dict) or str(row.get("EnvType", "")).lower() not in ENVIRONMENTS or row.get("Logic") is True:
                                 continue
                             engine = str(row.get("DbType", "")).lower()
-                            if not any(kind in engine for kind in ("mysql", "rds", "polar", "doris", "selectdb")):
+                            if engine_type(engine) is None:
                                 continue
                             database, identity = row.get("SchemaName"), str(row.get("DatabaseId", ""))
                             if not isinstance(database, str) or not database or len(database) > 128 or not re.fullmatch(r"[1-9][0-9]{0,19}", identity):
                                 continue
                             alias = str(row.get("Alias") or row.get("SearchName") or "")[:256]
                             label = " · ".join(value for value in (database, alias, engine, "#" + identity) if value)
-                            databases.append(dict(database=database, databaseId=identity, engine=engine, label=label[:512]))
+                            databases.append(dict(database=database, databaseId=identity, engine=engine_type(engine), environment=str(row["EnvType"]).lower(), label=label[:512]))
                     finally:
                         try:
                             executor.disable_ai_mode()

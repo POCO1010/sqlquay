@@ -13,7 +13,7 @@ function connectionConfig(input) {
   const name = trim('name'), group = trim('group'), engine = trim('engine'), host = trim('host'), database = trim('database');
   const port = Number(trim('port'));
   if (!name || name.length > 80 || group.length > 80 || /[\r\n\t]/.test(name + group)) throw Error('Enter a connection name (80 characters maximum).');
-  if (!['mysql','doris'].includes(engine) || !/^[a-z0-9](?:[a-z0-9.-]{0,251}[a-z0-9])?$/i.test(host) || !Number.isInteger(port) || port < 1 || port > 65535 || !/^[a-z0-9_-]{1,128}$/i.test(database)) throw Error('Enter a host name, port and exact database. JDBC URLs and connection options are not accepted.');
+  if (!['mysql','polardb','drds','doris'].includes(engine) || !/^[a-z0-9](?:[a-z0-9.-]{0,251}[a-z0-9])?$/i.test(host) || !Number.isInteger(port) || port < 1 || port > 65535 || !/^[a-z0-9_-]{1,128}$/i.test(database)) throw Error('Enter a host name, port and exact database. JDBC URLs and connection options are not accepted.');
   const sslMode = input.sslMode ?? 'VERIFY_IDENTITY';
   if (!['VERIFY_IDENTITY','DISABLED'].includes(sslMode)) throw Error('Choose a supported JDBC TLS mode.');
   return {name, group, engine, host, port, database, sslMode};

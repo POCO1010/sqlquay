@@ -18,7 +18,7 @@
 
 ## 先用离线 Demo 跑通
 
-1. 在 VS Code 的扩展视图选择 **Install from VSIX…**，打开 `artifacts/sqlquay-0.7.2.vsix`。
+1. 在 VS Code 的扩展视图选择 **Install from VSIX…**，打开 `artifacts/sqlquay-0.8.0.vsix`。
 2. 打开活动栏 **SQLQuay** → **Local Demo**，点击右侧 **New Query**。
 3. 按 `Cmd/Ctrl+Enter`，或点击 SQL 编辑器右上的 ▶。每次运行在旁边打开独立的 **Query Result #编号**，不会覆盖原结果。结果页改 SQL 后重新运行也会新开结果。
 4. 对象树的 **sandbox → Tables → products** 可查看字段。Demo 是进程内固定数据，只识别 `SELECT 1 AS probe` 及从 `products` 读取显式列的简单查询（可加 `WHERE id = …` 和 `LIMIT`）；不联网、不访问真实数据库。
@@ -27,9 +27,9 @@
 
 在 VS Code 用户设置中把 `dbWorkbench.driverJar` 设为可信的 MySQL Connector/J 8.0.12 或更新版 JAR 的绝对路径。需要 Java 8+、Python 3.10+，默认使用扩展附带的 `policy/query_guard.py`；需要时用 `dbWorkbench.javaPath`、`dbWorkbench.pythonPath` 指定解释器。`dbWorkbench.guardPath` 留空使用附带策略，或显式指向组织批准的同名脚本。JDBC 不调用 DMS CLI。
 
-在 **Database** 标题右侧点 **+**，选择 **JDBC**，再选择 MySQL 或 Apache Doris / SelectDB，填写主机、端口、精确库名和只读账号。**Save** 只保存，**Connect** 先读取当前库的表清单、成功后保存。密码只由 VS Code SecretStorage 保存，不进入连接清单或命令参数。JDBC 默认使用 **TLS → Verify server identity**，加密并校验服务器证书与主机名。对于不提供 TLS 的端点，可以在单条连接里显式选 **Disabled (unencrypted)** 并确认。此模式不验证服务端身份，SQL 和结果不加密；公网生产优先用 DMS。原连接保留默认校验，查询失败不会自动切换 TLS 模式。切换或编辑连接后，原查询编辑器不会无提示改绑。
+在 **Database** 标题右侧点 **+**，选择 **JDBC**，再选择 MySQL、PolarDB MySQL、PolarDB-X / DRDS 或 Apache Doris / SelectDB，填写主机、端口、精确库名和只读账号。**Save** 只保存，**Connect** 先读取当前库的表清单、成功后保存。密码只由 VS Code SecretStorage 保存，不进入连接清单或命令参数。JDBC 默认使用 **TLS → Verify server identity**，加密并校验服务器证书与主机名。对于不提供 TLS 的端点，可以在单条连接里显式选 **Disabled (unencrypted)** 并确认。此模式不验证服务端身份，SQL 和结果不加密；公网生产优先用 DMS。原连接保留默认校验，查询失败不会自动切换 TLS 模式。切换或编辑连接后，原查询编辑器不会无提示改绑。
 
-普通数据查询须使用有界谓词；MySQL 源表要有可核实的前导索引，扫描计划上限 10 万行；Doris / SelectDB 仅支持已识别的内部 OLAP 扫描，上限 1000 万行。
+普通数据查询须使用有界谓词；MySQL / PolarDB 源表要有可核实的前导索引，扫描计划上限 10 万行；Doris / SelectDB 仅支持已识别的内部 OLAP 扫描，上限 1000 万行。
 
 ## 用 DMS 读已核实的库
 
@@ -37,16 +37,17 @@
 
 1. 新建连接，选择 **DMS**。认证方式默认为 **AccessKey（推荐）**。
 2. 点击 **获取 AccessKey…** 直达[当前 RAM 用户的 AccessKey 管理页](https://ram.console.aliyun.com/profile/access-keys)，自行登录有目标库查询权限的 RAM 用户并创建 AccessKey。不要使用主账号 AK。[官方创建说明](https://help.aliyun.com/zh/ram/user-guide/create-an-accesskey-pair)
-3. 回到插件，粘贴 **AccessKey ID** 和 **AccessKey Secret**，确认 **地域**，在 **数据库** 一项输入完整或部分库名，点 **查找**。
-4. 勾选一个或多个目标库，也可全选当前结果；再次搜索会保留已选库，方便按不同名称继续添加。Database ID 自动记录，连接名称留空时自动填为 `DMS`，可自行修改。点 **保存** 只保存配置；点 **连接** 按所选库逐个读取表清单，全部成功后保存，不读取数据行。
+3. 回到插件，粘贴 **AccessKey ID** 和 **AccessKey Secret**，确认 **地域**。在 **实例** 输入名称并点 **查找**；留空列出当前 AK 可见的实例，可筛选环境和引擎。
+4. 展开一个实例，按库名查找并勾选目标数据库；可分页、跨实例多选，重新查找不会清空选择。Database ID、引擎、环境与实例身份由 CLI 核实后保存，名称留空时自动填为 `DMS`。
+5. 点 **保存** 或 **保存并打开** 保存配置，不执行全库连接检查。随后在对象树展开需要的库，才加载该库的表；失败只标记当前库，可显式刷新。
 
-保存后，侧栏按 **DMS 连接 → 数据库 → 表** 展开。一套 AK 只保存一份，每个库有独立的目标 ID、表清单和 DDL 缓存。新建查询或给已有文件选择执行/预览连接时，仍明确选择其中一个库；不会因切换侧栏而自动换库。
+保存后，侧栏按 **DMS 连接 → 实例 → 数据库 → 表** 展开。一套 AK 只保存一份，每个库有独立的目标 ID、表清单和 DDL 缓存。新建查询或给已有文件选择执行/预览连接时，仍明确选择其中一个库；不会因切换侧栏而自动换库。
 
 **后续追加**：在这条 AccessKey DMS 连接右侧点 **+ 添加数据库…**，或右键选择同名操作。原库显示“已添加”，可直接搜索并勾选新库，无需再粘贴 AK；只追加时原有数据库 ID、文件绑定和缓存保持。旧版单库 AccessKey 连接也能用这个操作追加，保留原目标 ID。已有 CLI profile 和 JDBC 连接不自动转换。
 
 **移除已添加的库**：在编辑连接页点该库右侧 **×**，或在搜索结果中取消勾选，再点 **保存**。移除只修改这条连接的库列表；AK 和其它库的身份、绑定与缓存保留。被移除库的旧文件及历史重跑须重新选择连接，不会自动切到其它库。可移除全部库并保留空连接，之后仍能用原 AK 添加；要连同认证一起移除，请在侧栏右键移除整条连接。
 
-搜索只读取 DMS 库元数据，不执行 SQL。当前列出生产环境的 MySQL、Doris、SelectDB 及兼容实例；仅处理前 100 个匹配项，目标库缺失时输入更完整的库名。用户的 RAM/DMS 身份须有目标库查询权限；创建 AK 本身不授予库权限。
+实例和库搜索只读取 DMS 元数据，不执行 SQL。支持生产、测试、开发、预发、SIT、UAT、压测与灰度环境；每次加载至多 100 条，可继续加载下一页。用户的 RAM/DMS 身份须有目标库查询权限；创建 AK 本身不授予库权限。
 
 密钥只在本机表单、执行器内存和 VS Code SecretStorage 中处理，不写入设置、连接清单、命令参数、临时凭据文件或日志。本次填写的密钥在表单内持续以掩码显示，搜索、多选、取消选择或保存失败都不清空；保存成功或关闭表单时释放这份临时输入。编辑连接时不回显密钥，留空保留原凭据；更换 AK 或地域后须重新搜索核实全部已添加库，相关文件随后须重新选择连接。
 
@@ -54,9 +55,17 @@
 
 ### 高级：保留已有 CLI profile
 
-已有 profile 连接原样保留，不自动迁移。新建连接也可选择 **已有 CLI 认证配置（高级）**：选择本机 profile 和地域，填写精确库名及已核实的 Database ID。默认用库名查找；已有连接的自定义查找名称会保留在 **高级匹配设置** 中，仅在 DMS 需要用其他名称查找时填写。插件只通过 `aliyun configure list` 读取名称、区域和认证状态，不读取配置文件中的密钥。
+已有 profile 连接原样保留，不自动迁移。新建连接也可选择 **已有 CLI 认证配置（高级）**：选择本机 profile、地域和环境，填写精确库名及已核实的 Database ID；可明确标记引擎，执行端仍重新核对实际 DMS 元数据。默认用库名查找；已有连接的自定义查找名称会保留在 **高级匹配设置** 中，仅在 DMS 需要用其他名称查找时填写。插件只通过 `aliyun configure list` 读取名称、区域和认证状态，不读取配置文件中的密钥。
 
 没有 profile 时，可以点 **配置 CLI 认证…**，自行在终端完成认证，再刷新列表。插件只预填命令，不自动执行认证。旧版未保存认证选项的连接继续使用 `dms-prod` / `cn-hangzhou`；组织批准的 `dbWorkbench.dmsWrapperPath` 仅对 profile 方式生效。若要从 profile 改用独立 AK，请新建连接；现有 JDBC 和 DMS 不受影响。
+
+## DRDS 与 Tablestore 的能力范围
+
+- **PolarDB-X / DRDS**：复用 MySQL 协议的 JDBC 驱动或 DMS，但独立识别引擎。数据查询先核实前导索引、`EXPLAIN SHARDING` 的单分片计划，以及 `EXPLAIN EXECUTE` 的底层扫描估算；未知、多分片、多表或超过 10 万行时拒绝并要求缩小范围。预览仍先检查完整扫描范围，再取显式列的最多 100 行。受控查询携带 5 秒 `SOCKET_TIMEOUT`；超时保留状态锁，不重试。
+- **Tablestore**：本版按已确认范围只开放 DMS 库、SQL 映射表、字段和 DDL。映射表是已有数据表的 SQL 结构入口，插件不自动创建映射。表定义读取真实的 `SHOW CREATE TABLE`，不按字段拼造 DDL；悬停不显示“预览数据”。缺少可验证的 EXPLAIN 扫描预算时，执行器拒绝数据 SQL 和预览。
+- **外置策略**：新增 DRDS、Tablestore 和实例选库要求执行器声明相应能力；不兼容时在查询前报配置错误。旧引擎、旧目标和已有外置策略入口继续按原合同使用，不自动替换用户设置。
+- **已有连接**：不启动自动迁移，也不改存量目标 ID、修订号或工作区绑定。缺少实例信息的旧多库 AK 数据库归在“已有数据库”下；用户下次明确选择并保存时才补入经核实的实例信息。
+- **查询锁**：JDBC、DMS 与工作站受控 CLI 共用互斥锁，并兼容 SQLQuay 0.7 的旧锁。独立 AK 仍不读取 AI/CLI 的凭据文件。
 
 ## 直接执行已有 SQL 文件
 

@@ -53,6 +53,13 @@ public final class Driver implements java.sql.Driver {
                                 if (sql.startsWith("show create table `sandbox`.")) return grid(new String[]{"Table","Create Table"},new String[][]{{"products","CREATE TABLE products (id BIGINT)"}});
                                 if (sql.startsWith("describe `sandbox`.")) return grid(new String[]{"Field","Type"},new String[][]{{"id","BIGINT"},{"user_phone","VARCHAR(64)"}});
                                 if (sql.startsWith("show index")) return grid(new String[]{"Key_name","Seq_in_index","Column_name"},new String[][]{{"PRIMARY","1","id"}});
+                                if (sql.startsWith("explain sharding")) return grid(new String[]{"SHARD_COUNT"},new String[][]{{sql.contains("two_shards") ? "2" : "1"}});
+                                if (sql.startsWith("explain execute")) return grid(new String[]{"rows"},new String[][]{{"100000"}});
+                                if (sql.startsWith("/*tddl:socket_timeout=5000*/")) {
+                                    if (sql.contains("drds_timeout_vendor")) throw new SQLException("ERR_SQL_QUERY_TIMEOUT", "HY000", 4202);
+                                    if (sql.contains("drds_timeout_message")) throw new SQLException("ERR_SQL_QUERY_MERGE_TIMEOUT", "HY000", 0);
+                                    return grid(new String[]{"id"},new String[][]{{"1"}});
+                                }
                                 if (sql.startsWith("explain select `id` from `sandbox`.")) {
                                     if (sql.contains("limit") || sql.contains("phone")) throw new AssertionError("Expected full-scan plan of safe fields.");
                                     if (url.contains(":9030/")) return grid(new String[]{"Plan"},new String[][]{{"0:VOlapScanNode(2)\n | cardinality=10,000,000, avgRowSize=1"}});

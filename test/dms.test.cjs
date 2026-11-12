@@ -45,7 +45,8 @@ test('DMS readiness and terminal-state errors do not retry or fall back', async 
     assert.equal(attempts.length,2);
   }
   await assert.rejects(adapter(t,{code:3,stdout:'',stderr:'{"status":"needs_split"}'})(target,'SELECT 1'),/scan budget/);
-  await assert.rejects(adapter(t,{code:2,stdout:'',stderr:'{"status":"blocked","error":"Database metadata did not resolve to one target"}'})(target,'SELECT 1'),/product environment/);
+  await assert.rejects(adapter(t,{code:2,stdout:'',stderr:'{"status":"blocked","error":"Database metadata did not resolve to one target"}'})(target,'SELECT 1'),/instance, environment/);
+  await assert.rejects(adapter(t,{code:2,stdout:'',stderr:JSON.stringify({status:'blocked',error:'External policy lacks required engine capabilities.'})})(target,'SELECT 1'),/compatible approved policy/);
   await assert.rejects(adapter(t,{code:null,stdout:'',stderr:''})(target,'SELECT 1'),DmsStopped);
 });
 test('validates DMS connection and rejects unsafe SQL before CLI execution', async t=>{
@@ -78,4 +79,15 @@ test('ordinary and preview queries carry the selected profile and region; legacy
  assert.ok(calls[3][1].includes('--profile=team-fixture'));assert.ok(calls[3][1].includes('--region=cn-beijing'));
  for(const profile of ['--help','x\nprofile']) assert.throws(()=>dmsConfig({...target,profile}),/valid Aliyun/);
  assert.throws(()=>dmsConfig({...target,region:'x;bad'}),/valid Aliyun/);
+});
+
+
+test('exact instance and non-production environments reach ordinary and preview DMS adapters',async t=>{
+  for(const environment of ['test','dev','pre']) {
+    const calls=[],query=adapter(t,ok(data),calls);
+    const bound={...target,environment,instanceId:'7',instanceName:'Fixture',engine:'mysql'};
+    await query(bound,'SELECT 1');
+    assert.ok(calls.at(-1)[1].includes('--environment='+environment));assert.ok(calls.at(-1)[1].includes('--instance-id=7'));
+  }
+  for(const input of [{...target,environment:'unknown'},{...target,instanceId:'--bad'},{...target,engine:'polardb_pg'}])assert.throws(()=>dmsConfig(input));
 });
