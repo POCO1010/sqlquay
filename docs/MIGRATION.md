@@ -9,7 +9,7 @@ SQLQuay 的正式 ID 是 `TomMajor.sqlquay`。旧版 `local-workbench.database-w
 ## 按顺序迁移
 
 1. 在 VS Code 选择 **Install from VSIX…**，安装 `artifacts/sqlquay-legacy-migration-0.4.3.vsix`，用它替换完整旧版。这个本机助手保留旧扩展 ID，只提供迁移接口，不注册查询命令和视图。
-2. 安装正式包 `artifacts/sqlquay-0.5.2.vsix`，然后 **Developer: Reload Window**。
+2. 安装正式包 `artifacts/sqlquay-0.6.0.vsix`，然后 **Developer: Reload Window**。
 3. 打开原来的工作区。在命令面板执行 **SQLQuay: 从旧版 Workbench 导入连接和当前工作区绑定**，选择要迁移的连接，再核对提示并点 **导入到 SQLQuay**。已有 DMS 时可只勾选 JDBC。
 4. 检查连接名称、通道、TLS、工作区默认预览连接，以及已有文件的单独 JDBC/DMS 选择。查询终态未确认的锁也会保留，核实终态后才能解锁。
 5. 其他工作区分别打开并执行同一导入命令。连接与密码只在新增对应连接时导入；新版本中已经修改的连接、凭据及显式文件选择不会被旧数据覆盖。

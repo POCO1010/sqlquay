@@ -51,6 +51,7 @@ async function main(){
    const dms=await create(browser,connectHtml(assets),520,true);
    await dms.getByRole('radio',{name:'DMS',exact:true}).check();
    assert.equal(await dms.getByLabel('Username').isVisible(),false);
+   await dms.getByRole('combobox',{name:'DMS authentication',exact:true}).selectOption('profile');
    assert.equal((await dms.evaluate(()=>window.sent.at(-1))).type,'loadDmsProfiles');
    await dispatch(dms,{type:'dmsProfiles',profiles:[{name:'team-fixture',region:'cn-beijing',valid:true}]});
    await dms.getByRole('combobox',{name:'Aliyun CLI profile'}).selectOption('team-fixture');
@@ -62,7 +63,7 @@ async function main(){
    }
    await dms.getByRole('button',{name:'Connect'}).click();
    assert.deepEqual((await dms.evaluate(()=>window.sent.at(-1))).values,{
-     channel:'dms',profile:'team-fixture',region:'cn-beijing',name:'DMS fixture',group:'',keyword:'fixture',database:'fixture',databaseId:'42'
+     channel:'dms',authMode:'profile',profile:'team-fixture',region:'cn-beijing',name:'DMS fixture',group:'',keyword:'fixture',database:'fixture',databaseId:'42'
    });
    await dispatch(dms,{type:'error',message:'Target not found.'});
    assert.equal(await dms.locator('#feedback').textContent(),'Target not found.');

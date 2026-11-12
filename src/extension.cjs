@@ -3,7 +3,7 @@ const vscode = require('vscode');
 const {randomUUID} = require('node:crypto');
 const {DEMO,demoQuery,pickSql,readonly,quoteTable} = require('./query.cjs');
 const {makeJdbc,UnknownState,connectionConfig} = require('./jdbc.cjs');
-const {makeDms,DmsStopped,dmsConfig,listDmsProfiles} = require('./dms.cjs');
+const {makeDms,DmsStopped,dmsConfig,listDmsProfiles,accessKeyCredentials,searchConfig,searchDmsDatabases,authMode} = require('./dms.cjs');
 const {relationAt,tableDdl} = require('./ddl.cjs');
 const {languages,regionAt,selectedSql} = require('./embedded.cjs');
 const {suggestions,ddlColumns} = require('./completion.cjs');
@@ -15,7 +15,7 @@ const {translator}=require('../media/i18n.js');
 
 // Version 0.1.0 stored JDBC connections without a channel field.
 const channelOf = c => c.engine === 'demo' ? 'demo' : c.channel === 'dms' ? 'dms' : 'jdbc';
-const targetSignature = c => JSON.stringify([channelOf(c),c.engine,c.host,c.port,c.database,c.databaseId,c.sslMode??'VERIFY_IDENTITY',...(channelOf(c)==='dms' ? [c.profile??'dms-prod',c.region??'cn-hangzhou'] : [])]);
+const targetSignature = c => JSON.stringify([channelOf(c),c.engine,c.host,c.port,c.database,c.databaseId,c.sslMode??'VERIFY_IDENTITY',...(channelOf(c)==='dms' ? [authMode(c),c.profile??'dms-prod',c.region??'cn-hangzhou'] : [])]);
 
 function activate(context) {
   const tr=translator(vscode.env?.language);
@@ -114,6 +114,13 @@ function activate(context) {
     if (typeof value?.user !== 'string' || typeof value?.password !== 'string') throw Error(tr("Saved credentials are unavailable."));
     return value;
   }
+  const akSecretKey=id=>'dms-ak:'+id;
+  async function dmsCredentialsFor(connection) {
+    const raw=await context.secrets.get(akSecretKey(connection.id));
+    if(!raw) throw Error('Edit this DMS connection to enter its AccessKey.');
+    try {return accessKeyCredentials(JSON.parse(raw));}
+    catch {throw Error('Saved DMS credentials are unavailable. Re-enter the AccessKey.');}
+  }
   const pendingChannel = () => context.globalState.get('jdbcPending',false) ? 'JDBC'
     : context.globalState.get('dmsPending',false) ? 'DMS' : undefined;
   async function query(connection, sql, limit = 200, credentials, table) {
@@ -132,7 +139,7 @@ function activate(context) {
     try {
       const settings = cfg(), python = settings.get('pythonPath');
       const execute = channel === 'dms'
-        ? () => makeDms({python,wrapper:settings.get('dmsWrapperPath') || path.join(context.extensionPath,'policy','execute_safe.py')})(connection,sql,limit,table)
+        ? async () => makeDms({python,wrapper:settings.get('dmsWrapperPath') || path.join(context.extensionPath,'policy','execute_safe.py')})(connection,sql,limit,table,authMode(connection)==='accessKey' ? credentials??await dmsCredentialsFor(connection) : undefined)
         : async () => {
           const auth = credentials ?? await credentialsFor(connection);
           return makeJdbc({java:settings.get('javaPath'),python,jar:settings.get('driverJar'),guard:settings.get('guardPath') || path.join(context.extensionPath,'policy','query_guard.py')},context.extensionPath)(connection,auth,sql,limit,table);
@@ -403,7 +410,13 @@ function activate(context) {
     }
     const panel = window.createWebviewPanel('dbw.connect',edit ? tr('Edit {0}',edit.name) : tr("Connect to server"),vscode.ViewColumn.One,webOptions);
     formPanel=panel;
-    let busy=false;
+    let busy=false,disposed=false,draftAuth,savedAuth,verifiedSearch;
+    const formAuth=async values=>{
+      if(values.accessKeyId || values.accessKeySecret) draftAuth=accessKeyCredentials(values);
+      if(draftAuth) return draftAuth;
+      if(edit && authMode(edit)==='accessKey') {savedAuth??=await dmsCredentialsFor(edit);return savedAuth;}
+      return accessKeyCredentials({});
+    };
     const receive = panel.webview.onDidReceiveMessage(async message => {
       if (!message || typeof message !== 'object') return;
       if (message.type==='close' && !busy) { panel.dispose();return; }
@@ -419,11 +432,33 @@ function activate(context) {
         terminal.show();terminal.sendText('aliyun configure --profile my-dms',false);
         return;
       }
+      if(message.type==='openAccessKeyGuide') {void vscode.env.openExternal(Uri.parse('https://ram.console.aliyun.com/profile/access-keys'));return;}
+      if(message.type==='searchDmsDatabases') {
+        if(busy || !workspace.isTrusted || !message.values || typeof message.values!=='object') return;
+        busy=true;
+        try {
+          if(online || pendingChannel()) throw Error('Wait for the active query to finish.');
+          if(edit) live(edit);
+          const search=searchConfig(message.values),auth=await formAuth(message.values);
+          online=true;
+          await context.globalState.update('dmsPending',true);
+          try {
+            const result=await searchDmsDatabases({python:cfg().get('pythonPath')},search,auth);
+            if(!disposed) verifiedSearch={...search,auth,databases:result.databases};
+            if(!disposed) await panel.webview.postMessage({type:'dmsDatabases',...result});
+            await context.globalState.update('dmsPending',false);
+          } catch(error) {
+            if(!(error instanceof DmsStopped)) await context.globalState.update('dmsPending',false);
+            throw error;
+          } finally {online=false;}
+        } catch(error) {if(!disposed) await panel.webview.postMessage({type:'error',message:tr(error.message)});}
+        finally {busy=false;}
+        return;
+      }
       if (message.type==='ready') { if(edit) await panel.webview.postMessage({type:'configure',connection:{...edit,channel:channelOf(edit)}});return; }
       if (busy || !['save','connect'].includes(message.type) || !message.values || typeof message.values!=='object') return;
       busy=true;
-      let disposed = false;
-      const lifecycle = panel.onDidDispose(()=>{disposed=true;});
+
       try {
         if (!workspace.isTrusted) throw Error(tr("Online connection configuration is disabled in untrusted workspaces."));
         if (edit) live(edit);
@@ -431,6 +466,7 @@ function activate(context) {
         if (!['jdbc','dms'].includes(channel) || (edit && channel !== channelOf(edit))) {
           throw Error(tr("To change the connection method, create a new connection."));
         }
+        if(edit && channel==='dms' && authMode(edit)!==authMode(message.values)) throw Error('To change DMS authentication, create a new connection.');
         const data = channel === 'dms' ? dmsConfig(message.values) : connectionConfig(message.values);
         const connection = {...data,channel,id:edit?.id ?? randomUUID(),revision:edit ? edit.revision : randomUUID()};
         let credentials, newUser = false;
@@ -452,22 +488,43 @@ function activate(context) {
           credentials = user ? {user,password} : await credentialsFor(edit);
           newUser = !!user;
         }
-        if (edit && (targetSignature(edit)!==targetSignature(connection) || newUser)) connection.revision=randomUUID();
+        let newAccessKey=false;
+        if(channel==='dms' && authMode(connection)==='accessKey') {
+          credentials=await formAuth(message.values);
+          newAccessKey=!!draftAuth;
+          const sameSaved=edit && !newAccessKey && targetSignature(edit)===targetSignature(connection);
+          const selected=verifiedSearch && verifiedSearch.region===connection.region && verifiedSearch.keyword===connection.keyword && verifiedSearch.auth===credentials &&
+            verifiedSearch.databases.some(row=>row.databaseId===connection.databaseId && row.database===connection.database);
+          if(!sameSaved && !selected) throw Error('Search and select the database with this AccessKey first.');
+        }
+        if (edit && (targetSignature(edit)!==targetSignature(connection) || newUser || newAccessKey)) connection.revision=randomUUID();
         const changedConnection=!edit || connection.revision!==edit.revision;
         const catalog = message.type === 'connect' ? await query(connection,'SHOW TABLES',10000,credentials) : undefined;
         if (disposed) return;
         const existing = context.globalState.get('connections',[]);
         if (catalog?.truncated) throw Error(tr("The table list exceeded the metadata display limit."));
         if (newUser) await context.secrets.store(secretKey(connection.id),JSON.stringify(credentials));
-        await context.globalState.update('connections',edit ? existing.map(c=>c.id===edit.id ? connection:c) : [...existing,connection]);
+        let previousAk;
+        if(newAccessKey) {
+          previousAk=await context.secrets.get(akSecretKey(connection.id));
+          await context.secrets.store(akSecretKey(connection.id),JSON.stringify(credentials));
+        }
+        try {await context.globalState.update('connections',edit ? existing.map(c=>c.id===edit.id ? connection:c) : [...existing,connection]);}
+        catch(error) {
+          if(newAccessKey) {
+            if(previousAk===undefined) await context.secrets.delete(akSecretKey(connection.id));
+            else await context.secrets.store(akSecretKey(connection.id),previousAk);
+          }
+          throw error;
+        }
         if (catalog) tables.set(connection.id,tableNames(catalog)); else if (changedConnection) tables.delete(connection.id);
         if (changedConnection) { columns.delete(connection.id); clearDdl(connection); }
         activeId = connection.id; changed.fire(); setEditorContext(); panel.dispose();
       } catch (error) {
         if (!disposed) await panel.webview.postMessage({type:'error',message:tr(error.message)});
-      } finally { busy=false; lifecycle.dispose(); }
+      } finally { busy=false; }
     });
-    panel.onDidDispose(()=>{receive.dispose();if(formPanel===panel) formPanel=undefined;});
+    panel.onDidDispose(()=>{disposed=true;draftAuth=savedAuth=verifiedSearch=undefined;receive.dispose();if(formPanel===panel) formPanel=undefined;});
     panel.webview.html=connectHtml(assetPaths(panel.webview));
   }
 
@@ -480,6 +537,7 @@ function activate(context) {
     if (confirmed!==tr("Remove")) return;
     await context.globalState.update('connections',context.globalState.get('connections',[]).filter(c=>c.id!==connection.id));
     if (channelOf(connection) === 'jdbc') await context.secrets.delete(secretKey(connection.id));
+    if(channelOf(connection)==='dms' && authMode(connection)==='accessKey') await context.secrets.delete(akSecretKey(connection.id));
     tables.delete(connection.id); columns.delete(connection.id); clearDdl(connection); if(activeId===connection.id) activeId='demo'; changed.fire(); setEditorContext();
   });
   register('refresh',async node=>{

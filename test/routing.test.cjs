@@ -8,7 +8,9 @@ for(const language of ['zh-cn','en']) test('connection routing, safety gates, ho
   const jdbc={id:'legacy',revision:'v1',name:'Existing JDBC',group:'',engine:'mysql',host:'fixture.invalid',port:3306,database:'sandbox'};
   const state=new Map([['connections',[jdbc]]]), calls=[], panels=[], commands=new Map(), errors=[];
   let tree, hoverProvider, completionProvider, stopped=false, secretReads=0, allowPlaintext=false, blocker;
-  const copied=[],deleted=[],terminals=[];
+  const copied=[],deleted=[],terminals=[],opened=[],akSecrets=new Map(),akSearches=[];
+  const akAuth={accessKeyId:'fixture-key-id',accessKeySecret:'fixture-key-secret'};
+  let failConnectionSave=false;
   const status={show(){this.visible=true;},hide(){this.visible=false;},dispose(){}}, stored=[];
   const documents=[], previewBindings=new Map();
   let pickedId, pickItems, duringPick, pickHistoryId, revealed;
@@ -38,7 +40,7 @@ for(const language of ['zh-cn','en']) test('connection routing, safety gates, ho
     },
     showTextDocument:async document=>{window.activeTextEditor={document,selection:{active:0}};}
   };
-  const vscode={window,env:{language,clipboard:{writeText:async value=>copied.push(value)}},workspace:{isTrusted:true,workspaceFolders:[{}],getWorkspaceFolder:uri=>uri.toString().startsWith('file:///workspace/') ? {} : undefined,getConfiguration:()=>({get:()=>''}),textDocuments:documents,openTextDocument:async ({content,language})=>{
+  const vscode={window,env:{language,openExternal:async url=>opened.push(url),clipboard:{writeText:async value=>copied.push(value)}},workspace:{isTrusted:true,workspaceFolders:[{}],getWorkspaceFolder:uri=>uri.toString().startsWith('file:///workspace/') ? {} : undefined,getConfiguration:()=>({get:()=>''}),textDocuments:documents,openTextDocument:async ({content,language})=>{
     const doc={languageId:language,uri:'untitled:'+documents.length,version:1,text:content,offsetAt:n=>n,positionAt:n=>n,getText(selection){return selection?'':this.text;}};
     documents.push(doc);return doc;
   }},commands:{executeCommand:async()=>{},registerCommand:(id,fn)=>{commands.set(id,fn);return dispose();}},
@@ -46,7 +48,7 @@ for(const language of ['zh-cn','en']) test('connection routing, safety gates, ho
     CompletionItem:class{constructor(label,kind){Object.assign(this,{label,kind});}},CompletionItemKind:{Struct:1,Field:2},
     MarkdownString:class {value='';appendText(s){this.value+=s;} appendMarkdown(s){this.value+=s;} appendCodeblock(s){this.value+=s;}},
     Hover:class {constructor(contents,range){Object.assign(this,{contents,range});}}, Range:class {},
-    TreeItem:class {},TreeItemCollapsibleState:{},ThemeIcon:class {},Uri:{joinPath:(...v)=>v.join('/')},
+    TreeItem:class {},TreeItemCollapsibleState:{},ThemeIcon:class {},Uri:{joinPath:(...v)=>v.join('/'),parse:value=>value},
     EventEmitter:class {fire(){}},ViewColumn:{One:1,Beside:2}};
   const load=Module._load;
   let activate;
@@ -61,7 +63,10 @@ for(const language of ['zh-cn','en']) test('connection routing, safety gates, ho
           if(sql.startsWith('SHOW CREATE TABLE')) return grid(['Table','Create Table'],[['products','CREATE TABLE products (jdbc INT)']]);
           return grid(['probe'],[['jdbc']]);
         }};
-        if(request==='./dms.cjs') return {...load.apply(this,arguments),listDmsProfiles:async()=>[{name:'team-fixture',region:'cn-beijing',valid:true}],makeDms:()=>async(connection,sql,limit,table)=>{
+        if(request==='./dms.cjs') return {...load.apply(this,arguments),listDmsProfiles:async()=>[{name:'team-fixture',region:'cn-beijing',valid:true}],
+          searchDmsDatabases:async(_settings,search,auth)=>{akSearches.push(search);assert.deepEqual(auth,akAuth);return {databases:[{database:'sandbox',databaseId:'42',engine:'mysql',label:'Fixture'}],more:false};},
+          makeDms:()=>async(connection,sql,limit,table,auth)=>{
+          if(connection.authMode==='accessKey') assert.deepEqual(auth,akAuth);
           if (table) { calls.push(['preview','dms',connection.id,table,limit]);return grid(['id'],[['2']]); }
           calls.push(['dms',connection.id,sql]);
           if(stopped) throw new DmsStopped('DMS fixture stopped.');
@@ -77,9 +82,9 @@ for(const language of ['zh-cn','en']) test('connection routing, safety gates, ho
     ({activate}=require('../src/extension.cjs'));
   } finally { Module._load=load; }
   activate({extensionUri:'fixture',extensionPath:'fixture',subscriptions:[],
-    globalState:{get:(key,other)=>state.get(key)??other,update:async(key,value)=>state.set(key,value)},
+    globalState:{get:(key,other)=>state.get(key)??other,update:async(key,value)=>{if(key==='connections' && failConnectionSave){failConnectionSave=false;throw Error('fixture storage failure');}state.set(key,value);}},
     workspaceState:{get:key=>previewBindings.get(key),update:async(key,value)=>previewBindings.set(key,value)},
-    secrets:{get:async key=>{secretReads++;assert.equal(key,'jdbc:legacy');return '{"user":"reader","password":"fixture"}';},store:async(key,value)=>stored.push([key,value]),delete:async key=>deleted.push(key)}
+    secrets:{get:async key=>{if(key.startsWith('dms-ak:')) return akSecrets.get(key);secretReads++;assert.equal(key,'jdbc:legacy');return '{"user":"reader","password":"fixture"}';},store:async(key,value)=>{stored.push([key,value]);if(key.startsWith('dms-ak:')) akSecrets.set(key,value);},delete:async key=>{deleted.push(key);akSecrets.delete(key);}}
   });
   const run=(id,...args)=>commands.get('dbw.'+id)(...args);
   const jdbcNode=tree.getChildren().find(x=>x.connection?.id==='legacy');
@@ -425,5 +430,36 @@ for(const language of ['zh-cn','en']) test('connection routing, safety gates, ho
   assert.equal(currentPanel().messages.at(-1).id,archived.id);
   assert.deepEqual(currentPanel().messages.at(-1).result.rows,archived.result.rows);
   assert.equal(calls.length,afterRemove);
+  assert.deepEqual(errors,[]);
+  for(const panel of panels.filter(p=>p.type==='dbw.result')) panel.dispose();
+  await run('clearHistory');
+  const oldConnections=JSON.stringify(state.get('connections')),oldBindings=JSON.stringify([...previewBindings]);
+  await run('connect');const akForm=panels.at(-1);
+  await akForm.receive({type:'openAccessKeyGuide'});assert.deepEqual(opened,['https://ram.console.aliyun.com/profile/access-keys']);
+  const akValues={channel:'dms',authMode:'accessKey',name:'AK fixture',region:'cn-beijing',keyword:'sandbox',database:'sandbox',databaseId:'42'};
+  await akForm.receive({type:'searchDmsDatabases',values:{...akValues,...akAuth}});
+  assert.equal(akSearches.length,1);assert.equal(akSecrets.size,0);
+  assert.equal(JSON.stringify(state.get('connections')),oldConnections);
+  assert.ok(!JSON.stringify(akForm.messages).includes(akAuth.accessKeySecret));
+  await akForm.receive({type:'save',values:{...akValues,databaseId:'43'}});
+  includes(akForm.messages.at(-1).message,'Search and select the database with this AccessKey first.');
+  assert.equal(akSecrets.size,0);
+  failConnectionSave=true;await akForm.receive({type:'save',values:akValues});
+  assert.equal(akSecrets.size,0);assert.equal(JSON.stringify(state.get('connections')),oldConnections);
+  await akForm.receive({type:'save',values:akValues});
+  const akNode=tree.getChildren().find(n=>n.connection?.authMode==='accessKey'),akKey='dms-ak:'+akNode.connection.id;
+  assert.deepEqual(JSON.parse(akSecrets.get(akKey)),akAuth);
+  assert.ok(!JSON.stringify(state.get('connections')).includes(akAuth.accessKeySecret));
+  assert.deepEqual(JSON.parse(oldConnections),state.get('connections').filter(c=>c.id!==akNode.connection.id));
+  assert.equal(JSON.stringify([...previewBindings]),oldBindings);
+  await run('newQuery',akNode);assert.deepEqual((await run('run')).rows,[['dms']]);
+  await run('edit',akNode);const akEdit=panels.at(-1);await akEdit.receive({type:'ready'});
+  assert.ok(!JSON.stringify(akEdit.messages).includes(akAuth.accessKeySecret));
+  await akEdit.receive({type:'save',values:{...akValues,name:'Renamed AK'}});
+  const renamedAk=tree.getChildren().find(n=>n.connection?.id===akNode.connection.id);
+  assert.equal(renamedAk.connection.revision,akNode.connection.revision);
+  assert.deepEqual((await run('run')).rows,[['dms']]);
+  await run('remove',renamedAk);assert.ok(!akSecrets.has(akKey));
+  assert.deepEqual(JSON.parse(oldConnections),state.get('connections'));
   assert.deepEqual(errors,[]);
 });

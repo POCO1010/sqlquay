@@ -15,14 +15,28 @@ function dmsConfig(input) {
       /[\x00-\x1f]/.test(keyword + database) || !/^[1-9][0-9]{0,19}$/.test(databaseId)) {
     throw Error('Enter the DMS search keyword, exact schema, and verified numeric Database ID.');
   }
+  if(!['profile','accessKey'].includes(authMode(input))) throw Error('Choose a supported DMS authentication method.');
   const profile=get('profile') || 'dms-prod', region=get('region') || 'cn-hangzhou';
   if (!profileName(profile) || !/^[a-z]{2}-[a-z0-9-]{1,40}$/.test(region)) throw Error('Choose a valid Aliyun CLI profile and region.');
-  return {channel:'dms',name,group,keyword,database,databaseId,profile,region};
+  return {channel:'dms',name,group,keyword,database,databaseId,region,...(authMode(input)==='accessKey'?{authMode:'accessKey'}:{profile})};
 }
 
-function call(command, args) {
+const authMode=connection=>connection.authMode??'profile';
+function accessKeyCredentials(input) {
+  const accessKeyId=typeof input?.accessKeyId==='string' ? input.accessKeyId.trim() : '';
+  const accessKeySecret=typeof input?.accessKeySecret==='string' ? input.accessKeySecret.trim() : '';
+  if(!accessKeyId || !accessKeySecret || accessKeyId.length>256 || accessKeySecret.length>256 || /[\s\x00-\x1f\x7f]/.test(accessKeyId+accessKeySecret)) throw Error('Enter both AccessKey ID and AccessKey Secret.');
+  return {accessKeyId,accessKeySecret};
+}
+function searchConfig(input) {
+  const keyword=typeof input?.keyword==='string' ? input.keyword.trim() : '';
+  const region=typeof input?.region==='string' ? input.region.trim() : '';
+  if(!keyword || keyword.length>128 || /[\x00-\x1f]/.test(keyword) || !/^[a-z]{2}-[a-z0-9-]{1,40}$/.test(region)) throw Error('Enter a region and a database search keyword.');
+  return {keyword,region};
+}
+function call(command, args, input) {
   return new Promise((resolve,reject) => {
-    const child = spawn(command,args,{stdio:['ignore','pipe','pipe'],windowsHide:true});
+    const child = spawn(command,args,{stdio:[input===undefined?'ignore':'pipe','pipe','pipe'],windowsHide:true});
     const buffers = {stdout:[],stderr:[]}, sizes = {stdout:0,stderr:0};
     const cap = 16 * 1024 * 1024;
     for (const key of ['stdout','stderr']) child[key].on('data', chunk => {
@@ -30,6 +44,7 @@ function call(command, args) {
       if (sizes[key] <= cap) buffers[key].push(chunk);
     });
     child.once('error',reject);
+    if(input!==undefined) {child.stdin.on('error',()=>{});child.stdin.end(JSON.stringify(input));}
     // Drain output and let the wrapper finish its AI Mode cleanup even if a result is too large.
     child.once('close',code=>resolve({code,stdout:Buffer.concat(buffers.stdout).toString(),
       stderr:Buffer.concat(buffers.stderr).toString(),stdoutOverflow:sizes.stdout>cap,stderrOverflow:sizes.stderr>cap}));
@@ -84,29 +99,36 @@ function grid(rows, sql, limit, columns) {
   })),truncated:rows.length>limit};
 }
 function makeDms(settings, transport = call) {
-  return async (connection, sql, limit = 200, table) => {
+  return async (connection, sql, limit = 200, table, credentials) => {
     const target = dmsConfig(connection), statement = table === undefined ? dmsReadonly(sql) : '';
-    const wrapper = expand(settings.wrapper);
+    const independent=authMode(target)==='accessKey';
+    const auth=independent ? accessKeyCredentials(credentials) : undefined;
+    const wrapper = independent ? path.join(__dirname,'..','policy','execute_safe.py') : expand(settings.wrapper);
     if (!path.isAbsolute(wrapper) || path.basename(wrapper) !== 'execute_safe.py') throw Error('Set dbWorkbench.dmsWrapperPath to the installed execute_safe.py.');
     try { accessSync(wrapper,constants.R_OK); } catch { throw Error('The approved DMS execute_safe.py was not found.'); }
-    let plugin;
-    try { plugin = await transport('aliyun',['plugin','list']); }
-    catch { throw Error('Aliyun CLI is not available to VS Code.'); }
-    if (plugin.code !== 0 || !/^\s*aliyun-cli-dms-enterprise(?:[ \t]|$)/m.test(plugin.stdout)) {
-      throw Error('Install and configure aliyun-cli-dms-enterprise separately; Workbench does not install plugins.');
+    if(!independent) {
+      let plugin;
+      try { plugin = await transport('aliyun',['plugin','list']); }
+      catch { throw Error('Aliyun CLI is not available to VS Code.'); }
+      if (plugin.code !== 0 || !/^\s*aliyun-cli-dms-enterprise(?:[ \t]|$)/m.test(plugin.stdout)) {
+        throw Error('Install and configure aliyun-cli-dms-enterprise separately; Workbench does not install plugins.');
+      }
     }
     let response;
     try {
       // The approved entrypoint uses the bound profile and owns target resolution, the
       // workstation lock, scan limits, timeouts, and the CLI AI Mode lifecycle.
-      const targetArgs=['--database-keyword='+target.keyword,'--schema='+target.database,'--db-id='+target.databaseId,'--profile='+target.profile,'--region='+target.region];
+      const targetArgs=['--database-keyword='+target.keyword,'--schema='+target.database,'--db-id='+target.databaseId,'--profile='+(independent?'sqlquay':target.profile),'--region='+target.region];
       const args=table === undefined ? ['-I','-B',path.join(__dirname,'..','scripts','dms_timed.py'),wrapper,...targetArgs,'--sql='+statement] :
         ['-I','-B',path.join(__dirname,'..','scripts','preview_safe.py'),...targetArgs,'--safe-wrapper='+wrapper,'--table='+table];
-      response = await transport(expand(settings.python),args);
+      response = independent
+        ? await transport(expand(settings.python),['-I','-B',path.join(__dirname,'..','scripts','dms_ak.py'),table===undefined?'query':'preview',...targetArgs,...(table===undefined?['--sql='+statement]:['--table='+table])],auth)
+        : await transport(expand(settings.python),args);
     } catch (error) {
       if (error.code === 'ENOENT') throw Error('Python executable was not found.');
       throw new DmsStopped('DMS wrapper exited unexpectedly. Verify query and AI Mode state.');
     }
+    setupFailure(response);
     const reports = response.stderr.split(/\r?\n/).flatMap(line=>{
       try { const value=JSON.parse(line);return object(value) ? [value] : []; } catch { return []; }
     });
@@ -136,4 +158,28 @@ function makeDms(settings, transport = call) {
     return {...grid(out.rows,statement,limit,table === undefined ? undefined : out.columns),...(timings ? {timings} : {})};
   };
 }
-module.exports = {dmsConfig, makeDms, DmsStopped, listDmsProfiles, parseProfiles};
+const setupMessages={
+  invalid_credentials:'Enter both AccessKey ID and AccessKey Secret.',
+  cli_missing:'Aliyun CLI is not available to VS Code.',
+  plugin_missing:'Install and configure aliyun-cli-dms-enterprise separately; Workbench does not install plugins.',
+  search_failed:'DMS database search failed. Check this AccessKey, region and DMS permissions.'
+};
+function setupFailure(response) {
+  for(const line of response.stderr.split(/\r?\n/)) {
+    let value;try {value=JSON.parse(line);} catch {continue;}
+    if(value.status==='configuration_error') throw Error(setupMessages[value.reason]??setupMessages.search_failed);
+  }
+}
+async function searchDmsDatabases(settings,input,credentials,transport=call) {
+  const {keyword,region}=searchConfig(input),auth=accessKeyCredentials(credentials);
+  let response;
+  try {response=await transport(expand(settings.python),['-I','-B',path.join(__dirname,'..','scripts','dms_ak.py'),'search','--database-keyword='+keyword,'--region='+region,'--profile=sqlquay'],auth);}
+  catch {throw Error('DMS database search failed. Check this AccessKey, region and DMS permissions.');}
+  if(response.stderr.includes('"cleanup_failed"')) throw new DmsStopped(locked.cleanup_failed);
+  setupFailure(response);
+  let result;try {result=JSON.parse(response.stdout);} catch { /* Refuse incomplete metadata. */ }
+  if(response.code!==0 || response.stdoutOverflow || result?.status!=='success' || !Array.isArray(result.databases) || result.databases.length>100 || typeof result.more!=='boolean' || !result.databases.every(row=>
+    object(row) && typeof row.databaseId==='string' && /^[1-9][0-9]{0,19}$/.test(row.databaseId) && typeof row.database==='string' && row.database.length>0 && row.database.length<=128 && typeof row.label==='string' && row.label.length<=512 && typeof row.engine==='string')) throw Error(setupMessages.search_failed);
+  return {databases:result.databases,more:result.more};
+}
+module.exports = {dmsConfig,makeDms,DmsStopped,listDmsProfiles,parseProfiles,accessKeyCredentials,searchConfig,searchDmsDatabases,authMode};

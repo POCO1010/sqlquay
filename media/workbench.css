@@ -49,6 +49,8 @@ button.secondary { background:var(--vscode-button-secondaryBackground,#3b3b3b); 
 .fields { display:grid; grid-template-columns:1fr 1fr; gap:8px 30px; max-width:790px; }
 .fields label { display:grid; grid-template-columns:minmax(72px,34%) 1fr; align-items:center; gap:8px; }
 .fields input,.fields select { height:32px; }
+#dms-database-picker label { display:flex; align-items:center; gap:12px; }
+#dms-database-picker select { flex:1; min-width:0; max-width:100%; }
 .form-actions { justify-content:center; margin-top:16px; }
 #feedback { text-align:center; color:var(--vscode-errorForeground,#f48771); min-height:1em; }
 .result { height:100vh; display:flex; flex-direction:column; overflow:hidden; }

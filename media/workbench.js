@@ -5,76 +5,103 @@
   const $ = id => document.getElementById(id);
   if (document.body.dataset.view === 'connect') {
     const form = $('connection'), feedback = $('feedback');
-    let engine = 'mysql', editing = false, profiles = [];
-    const loadProfiles=()=>{ $('dms-auth-status').textContent=tr("Reading local CLI profiles…"); vscode.postMessage({type:'loadDmsProfiles'}); };
+    let engine='mysql',editing=false,profiles=[],databases=[];
+    const method=()=>form.elements.channel.value,authMode=()=>form.elements.authMode.value;
+    const loadProfiles=()=>{$('dms-auth-status').textContent=tr('Reading local CLI profiles…');vscode.postMessage({type:'loadDmsProfiles'});};
+    const clearKeys=()=>{for(const key of ['accessKeyId','accessKeySecret']) form.elements[key].value='';};
+    const clearTargets=()=>{
+      databases=[];form.elements.schema.value=form.elements.databaseId.value='';
+      form.elements.dmsDatabase.replaceChildren(new Option(tr('Search, then choose a database'),''));
+    };
+    const working=busy=>{
+      const dms=method()==='dms',ak=authMode()==='accessKey';
+      $('methods').disabled=busy||editing;
+      $('jdbc-fields').hidden=dms;$('jdbc-fields').disabled=busy||dms;
+      $('dms-fields').hidden=!dms;$('dms-fields').disabled=busy||!dms;
+      form.elements.authMode.disabled=busy||editing;
+      $('dms-ak-fields').hidden=!ak;$('dms-ak-fields').disabled=busy||!dms||!ak;
+      $('dms-profile-fields').hidden=ak;$('dms-profile-fields').disabled=busy||!dms||ak;
+      $('dms-database-picker').hidden=!ak;$('dms-database-picker').disabled=busy||!dms||!ak;
+      $('dms-search').hidden=!ak;$('dms-search-status').hidden=!ak;$('dms-search').disabled=busy;
+      $('tls-warning').hidden=dms||form.elements.sslMode.value!=='DISABLED';
+      for(const control of form.querySelectorAll('[name="name"],[name="group"],button[type="submit"]')) control.disabled=busy;
+    };
     $('dms-profiles').onclick=loadProfiles;
     $('dms-auth').onclick=()=>vscode.postMessage({type:'configureDms'});
-    const method = () => form.elements.channel.value;
-    const working = busy => {
-      const dms = method() === 'dms';
-      $('methods').disabled = busy || editing;
-      $('jdbc-fields').hidden = dms;
-      $('jdbc-fields').disabled = busy || dms;
-      $('dms-fields').hidden = !dms;
-      $('dms-fields').disabled = busy || !dms;
-      $('tls-warning').hidden = dms || form.elements.sslMode.value !== 'DISABLED';
-      for (const control of form.querySelectorAll('[name="name"],[name="group"],button[type="submit"]')) control.disabled = busy;
+    $('dms-ak-guide').onclick=()=>vscode.postMessage({type:'openAccessKeyGuide'});
+    $('dms-search').onclick=()=>{
+      const values={keyword:form.elements.keyword.value,region:form.elements.region.value,accessKeyId:form.elements.accessKeyId.value,accessKeySecret:form.elements.accessKeySecret.value};
+      if(!values.keyword.trim() || !values.region.trim()) {feedback.textContent=tr('Enter a region and a database search keyword.');return;}
+      clearTargets();feedback.textContent=tr('Searching databases…');working(true);
+      vscode.postMessage({type:'searchDmsDatabases',values});clearKeys();
     };
-    form.addEventListener('change', e => {
-      if (e.target.name === 'channel') { feedback.textContent = ''; working(false); if(method()==='dms') loadProfiles(); }
+    form.addEventListener('input',e=>{
+      if(authMode()==='accessKey' && ['accessKeyId','accessKeySecret','region','keyword'].includes(e.target.name)) clearTargets();
+    });
+    form.addEventListener('change',e=>{
+      if(e.target.name==='channel' || e.target.name==='authMode') {
+        feedback.textContent='';working(false);
+        if(method()==='dms' && authMode()==='profile') loadProfiles();
+      }
+      if(e.target.name==='dmsDatabase') {
+        const selected=databases.find(row=>row.databaseId===form.elements.dmsDatabase.value);
+        form.elements.schema.value=selected?.database??'';form.elements.databaseId.value=selected?.databaseId??'';
+        if(selected && !form.elements.name.value.trim()) form.elements.name.value=selected.database+' · DMS';
+      }
       if(e.target.name==='profile') {
         const selected=profiles.find(p=>p.name===form.elements.profile.value);
-        form.elements.region.value=selected?.region ?? '';
-        $('dms-auth-status').textContent=selected?.valid ? tr("Authentication uses the selected local CLI profile.") : tr("Configure or refresh this profile in your terminal, then refresh the list.");
+        form.elements.region.value=selected?.region??'';
+        $('dms-auth-status').textContent=selected?.valid ? tr('Authentication uses the selected local CLI profile.') : tr('Configure or refresh this profile in your terminal, then refresh the list.');
       }
-      if (e.target.name === 'sslMode') working(false);
-      if (e.target.name !== 'engine') return;
-      const oldDefault = engine === 'mysql' ? '3306' : '9030';
-      engine = e.target.value;
-      if (form.elements.port.value === oldDefault) form.elements.port.value = engine === 'mysql' ? '3306' : '9030';
+      if(e.target.name==='sslMode') working(false);
+      if(e.target.name!=='engine') return;
+      const oldDefault=engine==='mysql'?'3306':'9030';engine=e.target.value;
+      if(form.elements.port.value===oldDefault) form.elements.port.value=engine==='mysql'?'3306':'9030';
     });
-    form.addEventListener('submit', e => {
+    form.addEventListener('submit',e=>{
       e.preventDefault();
-      const values = {...Object.fromEntries(new FormData(form)),channel:method()};
-      if (values.channel === 'dms') {
-        values.database = values.schema;
-        delete values.schema;
+      const values={...Object.fromEntries(new FormData(form)),channel:method()};
+      if(values.channel==='dms') {
+        values.authMode=authMode();values.database=form.elements.schema.value;values.databaseId=form.elements.databaseId.value;
+        delete values.schema;delete values.dmsDatabase;
       }
-      const type = e.submitter?.value === 'save' ? 'save' : 'connect';
-      feedback.textContent = type === 'connect' ? tr("Checking connection…") : tr("Saving…");
-      working(true);
-      vscode.postMessage({type,values});
-      form.elements.password.value = '';
+      const type=e.submitter?.value==='save'?'save':'connect';
+      feedback.textContent=type==='connect'?tr('Checking connection…'):tr('Saving…');working(true);
+      vscode.postMessage({type,values});form.elements.password.value='';clearKeys();
     });
-    $('close').onclick = () => vscode.postMessage({type:'close'});
-    window.addEventListener('message', ({data:m}) => {
-      if (m?.type === 'configure' && m.connection) {
-        const {channel, name, group, database, engine:kind, host, port, keyword, databaseId, sslMode, profile, region} = m.connection;
-        $('heading').textContent = tr("Edit connection");
-        editing = true;
-        form.elements.channel.value = channel;
-        const values = channel === 'dms' ? {name,group,schema:database,keyword,databaseId,region:region??'cn-hangzhou'} : {name,group,database,engine:kind,host,port,sslMode:sslMode ?? 'VERIFY_IDENTITY'};
-        for (const [key,value] of Object.entries(values)) form.elements[key].value = value ?? '';
-        if (channel === 'jdbc') {
-          form.elements.user.required = false;
-          form.elements.user.placeholder = tr("Leave blank to keep credentials");
-          engine = kind;
-        }
-        if(channel==='dms') {
-          form.elements.profile.add(new Option(profile??'dms-prod',profile??'dms-prod',true,true));loadProfiles();
+    $('close').onclick=()=>vscode.postMessage({type:'close'});
+    window.addEventListener('message',({data:m})=>{
+      if(m?.type==='configure' && m.connection) {
+        const {channel,name,group,database,engine:kind,host,port,keyword,databaseId,sslMode,profile,region,authMode:auth}=m.connection;
+        $('heading').textContent=tr('Edit connection');editing=true;form.elements.channel.value=channel;
+        const values=channel==='dms'?{name,group,schema:database,keyword,databaseId,region:region??'cn-hangzhou',authMode:auth??'profile'}:{name,group,database,engine:kind,host,port,sslMode:sslMode??'VERIFY_IDENTITY'};
+        for(const [key,value] of Object.entries(values)) form.elements[key].value=value??'';
+        if(channel==='jdbc') {form.elements.user.required=false;form.elements.user.placeholder=tr('Leave blank to keep credentials');engine=kind;}
+        if(channel==='dms' && authMode()==='profile') {form.elements.profile.add(new Option(profile??'dms-prod',profile??'dms-prod',true,true));loadProfiles();}
+        if(channel==='dms' && authMode()==='accessKey') {
+          databases=[{database,databaseId}];form.elements.dmsDatabase.add(new Option(database+' · #'+databaseId,databaseId,true,true));
+          for(const key of ['accessKeyId','accessKeySecret']) form.elements[key].placeholder=tr('Leave blank to keep credentials');
         }
         working(false);
       }
       if(m?.type==='dmsProfiles') {
-        const selected=form.elements.profile.value;
-        profiles=Array.isArray(m.profiles) ? m.profiles : [];
-        form.elements.profile.replaceChildren(new Option(tr("Choose a configured profile"),''),...profiles.map(p=>new Option(p.name+' · '+p.region+(p.valid?'':tr(" · authentication needed")),p.name)));
-        if(selected && !profiles.some(p=>p.name===selected)) form.elements.profile.add(new Option(selected+tr(" · not found locally"),selected));
+        const selected=form.elements.profile.value;profiles=Array.isArray(m.profiles)?m.profiles:[];
+        form.elements.profile.replaceChildren(new Option(tr('Choose a configured profile'),''),...profiles.map(p=>new Option(p.name+' · '+p.region+(p.valid?'':tr(' · authentication needed')),p.name)));
+        if(selected && !profiles.some(p=>p.name===selected)) form.elements.profile.add(new Option(selected+tr(' · not found locally'),selected));
         form.elements.profile.value=selected;
-        $('dms-auth-status').textContent=m.message || (profiles.length ? tr("Select a local CLI profile. Region can be adjusted for your DMS service.") : tr("No named profile found. Configure CLI authentication in the terminal, then refresh."));
+        $('dms-auth-status').textContent=m.message||(profiles.length?tr('Select a local CLI profile. Region can be adjusted for your DMS service.'):tr('No named profile found. Configure CLI authentication in the terminal, then refresh.'));
       }
-      if (m?.type === 'error') { feedback.textContent = m.message; working(false); }
+      if(m?.type==='dmsDatabases') {
+        databases=Array.isArray(m.databases)?m.databases:[];
+        form.elements.dmsDatabase.replaceChildren(new Option(tr('Search, then choose a database'),''),...databases.map(row=>new Option(row.label,row.databaseId)));
+        feedback.textContent=databases.length?'':tr('No supported production database found. Check permissions or refine the keyword.');
+        $('dms-search-status').textContent=databases.length?tr('Found {0} databases. Choose one, then save or connect.',databases.length)+(m.more?' '+tr('Only the first 100 matches are searched. Refine the keyword if your database is missing.'):''):'';
+        for(const key of ['accessKeyId','accessKeySecret']) form.elements[key].placeholder=tr('Leave blank to keep the entered AccessKey');
+        working(false);
+      }
+      if(m?.type==='error') {feedback.textContent=m.message;working(false);}
     });
+    working(false);
   } else {
     let data = [], cols = [], numericColumns = [], preview = false, page = 0, sort = null, selected = null, runId = 0, truncated = false;
     const statement = $('statement'), filter = $('filter'), size = $('size'), message = $('message');

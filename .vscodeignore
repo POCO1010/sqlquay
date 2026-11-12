@@ -11,6 +11,7 @@
 !scripts/jdbc_guard.py
 !scripts/preview_safe.py
 !scripts/dms_timed.py
+!scripts/dms_ak.py
 !build/jdbc/**
 **/__pycache__/**
 **/*.pyc

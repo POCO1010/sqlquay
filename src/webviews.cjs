@@ -39,17 +39,31 @@ function connectHtml(assets) {
 <p id="tls-warning" class="hint tls-warning" hidden>${h("No TLS: the server is not verified and SQL and results travel unencrypted.")}</p>
 </fieldset>
 <fieldset id="dms-fields" hidden disabled>
-<div class="config-tabs"><span>${h("Config")}</span><span class="tab active">${h("Main")}</span><span class="subdued">${h("Read-only · Aliyun CLI")}</span></div>
+<div class="config-tabs"><span>${h("Config")}</span><span class="tab active">${h("Main")}</span><span class="subdued">${h("Read-only · Alibaba Cloud DMS")}</span></div>
 <div class="fields">
+<label>${h('Authentication')} <select name="authMode" aria-label="${h('DMS authentication')}"><option value="accessKey">${h('AccessKey (recommended)')}</option><option value="profile">${h('Existing CLI profile (advanced)')}</option></select></label>
+<label>${h("Region")} <input required name="region" aria-label="${h("DMS region")}" maxlength="43" value="cn-hangzhou" placeholder="cn-hangzhou"></label>
+</div>
+<fieldset id="dms-ak-fields">
+<p class="hint"><button type="button" id="dms-ak-guide" class="plain">${h('Get AccessKey…')}</button> <span class="subdued">${h('Sign in as a RAM user with DMS query permission and create an AccessKey. Do not use the main account.')}</span></p>
+<div class="fields hint">
+<label>AccessKey ID <input name="accessKeyId" type="password" autocomplete="off" maxlength="256" placeholder="${h('Paste AccessKey ID')}"></label>
+<label>AccessKey Secret <input name="accessKeySecret" type="password" autocomplete="off" maxlength="256" placeholder="${h('Paste AccessKey Secret')}"></label>
+</div>
+<p class="subdued hint" id="dms-ak-status">${h('Keys stay in VS Code SecretStorage; no CLI account setup is required.')}</p>
+</fieldset>
+<div class="fields hint"><label>${h("Search keyword")} <input required name="keyword" maxlength="128" placeholder="${h("Keyword used in DMS")}"></label><button type="button" id="dms-search" class="secondary">${h('Search databases')}</button></div>
+<fieldset id="dms-database-picker" class="hint"><label>${h('Select database')} <select required name="dmsDatabase" aria-label="${h('Select database')}"><option value="">${h('Search, then choose a database')}</option></select></label></fieldset>
+<fieldset id="dms-profile-fields" hidden disabled>
+<div class="fields hint">
 <label>${h("CLI profile")} <select required name="profile" aria-label="${h("Aliyun CLI profile")}"><option value="">${h("Choose a configured profile")}</option></select></label>
-<label>${h("Region")} <input required name="region" aria-label="${h("DMS region")}" maxlength="43" placeholder="cn-hangzhou"></label>
-<label>${h("Search keyword")} <input required name="keyword" maxlength="128" placeholder="${h("Keyword used in DMS")}"></label>
 <label>${h("Schema")} <input required name="schema" maxlength="128" placeholder="${h("Exact schema name")}"></label>
 <label>${h("Database ID")} <input required name="databaseId" inputmode="numeric" pattern="[1-9][0-9]{0,19}" maxlength="20" placeholder="${h("Verified DMS ID")}"></label>
 </div>
 <p id="dms-auth-status" class="subdued hint" role="status">${h("Choose the named Aliyun CLI profile that can access this DMS database.")}</p>
 <div class="form-actions"><button type="button" id="dms-profiles" class="secondary">${h("Refresh profiles")}</button><button type="button" id="dms-auth" class="plain">${h("Configure CLI authentication…")}</button></div>
-<p class="subdued hint">${h("DMS authentication stays in Aliyun CLI; SQLQuay does not store its AccessKeys. Production databases only. Configure a named profile in the terminal, then refresh this list.")}</p>
+</fieldset>
+<p id="dms-search-status" class="subdued hint" role="status">${h('Search lists production MySQL, Doris and SelectDB databases. Database ID is filled automatically.')}</p>
 </fieldset>
 <div class="form-actions"><button type="submit" name="action" value="save" class="secondary">${h("Save")}</button><button type="submit" name="action" value="connect">＋ ${h("Connect")}</button><button type="button" id="close" class="plain">× ${h("Close")}</button></div>
 <p id="feedback" role="status"></p>

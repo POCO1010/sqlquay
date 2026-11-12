@@ -18,7 +18,7 @@
 
 ## 先用离线 Demo 跑通
 
-1. 在 VS Code 的扩展视图选择 **Install from VSIX…**，打开 `artifacts/sqlquay-0.5.2.vsix`。
+1. 在 VS Code 的扩展视图选择 **Install from VSIX…**，打开 `artifacts/sqlquay-0.6.0.vsix`。
 2. 打开活动栏 **SQLQuay** → **Local Demo**，点击右侧 **New Query**。
 3. 按 `Cmd/Ctrl+Enter`，或点击 SQL 编辑器右上的 ▶。每次运行在旁边打开独立的 **Query Result #编号**，不会覆盖原结果。结果页改 SQL 后重新运行也会新开结果。
 4. 对象树的 **sandbox → Tables → products** 可查看字段。Demo 是进程内固定数据，只识别 `SELECT 1 AS probe` 及从 `products` 读取显式列的简单查询（可加 `WHERE id = …` 和 `LIMIT`）；不联网、不访问真实数据库。
@@ -33,15 +33,24 @@
 
 ## 用 DMS 读已核实的库
 
-先在本机安装阿里云官方 CLI 和 `aliyun-cli-dms-enterprise` 插件，并配置一个有 DMS 权限的命名 profile。已有 profile 可以直接使用，不必创建 `dms-prod`。
+### 默认：独立 AccessKey，不用配置 profile
 
-在 **Database → + → DMS** 选择 **CLI profile**。插件只通过 `aliyun configure list` 读取 profile 名称、区域和认证状态；不会读取配置文件中的 AccessKey。**Region** 默认取所选 profile 的区域，可改为目标 DMS 服务区域。
+1. 新建连接，选择 **DMS**。认证方式默认为 **AccessKey（推荐）**。
+2. 点击 **获取 AccessKey…** 直达[当前 RAM 用户的 AccessKey 管理页](https://ram.console.aliyun.com/profile/access-keys)，自行登录有目标库查询权限的 RAM 用户并创建 AccessKey。不要使用主账号 AK。[官方创建说明](https://help.aliyun.com/zh/ram/user-guide/create-an-accesskey-pair)
+3. 回到插件，粘贴 **AccessKey ID** 和 **AccessKey Secret**，确认 **地域**，填写库名关键词并点 **搜索数据库**。
+4. 选择目标库，Database ID 自动填入，连接名称留空时也会自动填写。点 **保存** 只保存；点 **连接** 读取表清单后保存。
 
-没有 profile 时，点 **Configure CLI authentication…**，在打开的本机终端中把示例 `my-dms` 换成自己的名称，再自行执行认证；插件只预填命令，不自动执行或接收凭据。完成后点 **Refresh profiles**。
+搜索只读取 DMS 库元数据，不执行 SQL。当前列出生产环境的 MySQL、Doris、SelectDB 及兼容实例；仅处理前 100 个匹配项，目标库缺失时缩小关键词范围。用户的 RAM/DMS 身份须有目标库查询权限；创建 AK 本身不授予库权限。
 
-填写 **Search keyword**（DMS 搜索关键词）、**Schema**（精确库名）、**Database ID**（已核实的 DMS 数字 ID）。**Save** 只保存；**Connect** 读取表清单后保存。打开 **New Query** 可先运行 `SELECT 1 AS probe;`。
+密钥只在本机表单、执行器内存和 VS Code SecretStorage 中处理，不写入设置、连接清单、命令参数、临时凭据文件或日志。搜索后输入框清空，本次表单在内存中保留凭据；保存前关闭表单即丢弃。编辑连接时不回显密钥，留空保留原凭据；更换 AK 后须重新搜索选库，相关文件随后须重新选择连接。
 
-DMS 使用所选 profile 和 region 调用本机 CLI 与附带的 `policy/execute_safe.py`，核对 `product` 环境和精确 Database ID。当前测试库继续使用 JDBC。DMS 不需要数据库密码或 Java，也不自动安装、更新插件或切换 CLI 默认 profile。旧版未保存认证选项的连接继续使用 `dms-prod` / `cn-hangzhou`；已有组织批准的 `dbWorkbench.dmsWrapperPath` 保留。普通查询、DDL 和数据预览使用同一连接身份，继续保留有界条件、索引、EXPLAIN、扫描阈值、单查询锁及超时不重试。
+独立 AK 模式仍需要本机 Python 3.10+、阿里云 CLI 和已有 `aliyun-cli-dms-enterprise` 插件，但不要求先在 CLI 配置账号。它始终使用扩展附带的只读执行器：凭据仅在 CLI 子进程环境中生效，忽略本机既有 profile，每次操作使用独立临时目录保存非密 AI-Mode 状态，结束后关闭并移除该目录。不会读取或改写现有 AI/CLI 凭据配置、切换默认 profile 或自动安装插件。普通查询、DDL 悬停和显式点击的数据预览都使用所选连接的身份，保留 EXPLAIN、扫描阈值、全机单查询锁和超时不重试。
+
+### 高级：保留已有 CLI profile
+
+已有 profile 连接原样保留，不自动迁移。新建连接也可选择 **已有 CLI 认证配置（高级）**：选择本机 profile 和地域，填写 DMS 搜索关键词、精确库名及已核实的 Database ID。插件只通过 `aliyun configure list` 读取名称、区域和认证状态，不读取配置文件中的密钥。
+
+没有 profile 时，可以点 **配置 CLI 认证…**，自行在终端完成认证，再刷新列表。插件只预填命令，不自动执行认证。旧版未保存认证选项的连接继续使用 `dms-prod` / `cn-hangzhou`；组织批准的 `dbWorkbench.dmsWrapperPath` 仅对 profile 方式生效。若要从 profile 改用独立 AK，请新建连接；现有 JDBC 和 DMS 不受影响。
 
 ## 直接执行已有 SQL 文件
 

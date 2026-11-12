@@ -19,6 +19,6 @@
   "setting.driverJar": "可信 MySQL Connector/J 8.0.12+ 驱动 JAR 的绝对路径。",
   "setting.javaPath": "Java 8+ 可执行文件路径。",
   "setting.pythonPath": "共享只读 SQL 策略使用的 Python 3 可执行文件路径。",
-  "setting.dmsWrapperPath": "可选：组织批准的 execute_safe.py 路径。留空使用附带执行器和连接所选的 CLI 认证配置。",
+  "setting.dmsWrapperPath": "可选：已有 CLI 认证配置连接使用的组织批准 execute_safe.py 路径。独立 AccessKey 连接使用附带的隔离执行器。",
   "setting.guardPath": "可选：组织批准的 query_guard.py 路径。留空使用附带的只读策略。"
 }

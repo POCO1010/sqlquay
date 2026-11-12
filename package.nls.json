@@ -19,6 +19,6 @@
   "setting.driverJar": "Absolute path to a trusted MySQL Connector/J 8.0.12+ JAR.",
   "setting.javaPath": "Java 8+ executable.",
   "setting.pythonPath": "Python 3 executable for the shared read-only query guard.",
-  "setting.dmsWrapperPath": "Optional approved execute_safe.py override. Empty uses the bundled wrapper with the connection-selected CLI profile.",
+  "setting.dmsWrapperPath": "Optional approved execute_safe.py override for CLI-profile connections. AccessKey connections use the bundled isolated executor.",
   "setting.guardPath": "Optional approved query_guard.py override. Empty uses the bundled read-only policy."
 }

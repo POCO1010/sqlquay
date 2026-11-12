@@ -5,7 +5,7 @@
 - 展示名：SQLQuay。
 - Marketplace Publisher：`TomMajor`，由所有者完成创建。
 - 正式扩展 ID：`TomMajor.sqlquay`。
-- 当前构建包：`artifacts/sqlquay-0.5.2.vsix`，标记 Preview。
+- 当前构建包：`artifacts/sqlquay-0.6.0.vsix`，标记 Preview。
 - 许可证：MIT。外部 Java、Python、阿里云 CLI 与 Connector/J 不随包分发。
 - GitHub：<https://github.com/POCO1010/sqlquay>，默认分支 `main`。
 
@@ -26,15 +26,15 @@ npm run check:public
 npm run package
 ```
 
-`npm run package` 调用官方 `@vscode/vsce`，先编译 Java 8 兼容桥接类；包含声明的源码、PNG 图标、桥接类、三个 Python 入口和附带策略。`.vscodeignore` 排除测试、原始分析材料、依赖、日志及其他安装包。按当前锁定依赖构建，不全局安装发布工具。
+`npm run package` 调用官方 `@vscode/vsce`，先编译 Java 8 兼容桥接类；包含声明的源码、PNG 图标、桥接类、四个 Python 入口和附带策略。`.vscodeignore` 排除测试、原始分析材料、依赖、日志及其他安装包。按当前锁定依赖构建，不全局安装发布工具。
 
-JDBC/DMS 的只读策略位于 `policy/`，没有真实连接、数据库 ID 或账号；设置留空即使用附带策略。组织批准的外置策略仍可显式指定，迁移旧安装时保留原策略路径和锁范围。两种方式继续做目标核对、EXPLAIN、扫描阈值、单查询锁及超时不重试。
+JDBC/DMS 的只读策略位于 `policy/`，没有真实连接、数据库 ID 或账号；设置留空即使用附带策略。组织批准的外置策略仍可显式指定，迁移旧安装时保留原策略路径和锁范围。独立 AccessKey 使用附带的隔离执行器；DMS 外置覆盖仅用于已有 CLI profile 方式。两种方式继续做目标核对、EXPLAIN、扫描阈值、单查询锁及超时不重试。
 
 ## 首次手动上传
 
 1. 在独立 VS Code 配置中安装正式 VSIX，完成 Demo、两种通道的离线夹具与迁移验证。
 2. 打开 [TomMajor 管理页](https://marketplace.visualstudio.com/manage/publishers/TomMajor)。
-3. 新建 Visual Studio Code 扩展，只上传 `sqlquay-0.5.2.vsix`。不要上传 `sqlquay-legacy-migration-0.4.3.vsix`。
+3. 新建 Visual Studio Code 扩展，只上传 `sqlquay-0.6.0.vsix`。不要上传 `sqlquay-legacy-migration-0.4.3.vsix`。
 4. 根据平台返回的校验结果处理，核对展示名、Publisher、版本、MIT 许可和安装说明。
 5. 从市场下载到独立配置验收，再安排已有用户迁移；不要删除旧版数据或唯一可用的旧 VSIX。
 
