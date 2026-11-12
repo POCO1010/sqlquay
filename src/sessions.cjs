@@ -11,4 +11,14 @@ class Sessions {
   }
   clearClosed(){this.entries=this.entries.filter(e=>e.panel || e.pinned || e.view.state==='running');}
 }
-module.exports={Sessions};
+function copyCells(result,selection) {
+  const {rows,from,to}=selection??{};
+  if(!Array.isArray(result?.rows) || !Array.isArray(rows) || !rows.length || rows.length>result.rows.length ||
+    new Set(rows).size!==rows.length || rows.some(i=>!Number.isInteger(i) || i<0 || i>=result.rows.length) ||
+    !Number.isInteger(from) || !Number.isInteger(to) || from<0 || from>to || to>=result.columns.length) return;
+  const values=rows.map(i=>result.rows[i].slice(from,to+1).map(v=>v===null?'NULL':v));
+  if(values.length===1 && from===to) return values[0][0];
+  const tsv=value=>/[\t\r\n"]/.test(value)?'"'+value.replaceAll('"','""')+'"':value;
+  return values.map(row=>row.map(tsv).join('\t')).join('\n');
+}
+module.exports={Sessions,copyCells};

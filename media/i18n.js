@@ -5,6 +5,26 @@
   else window.SQLQuayI18n=api;
 })(()=>{
   const messages={
+    "Unmarked": "未标记",
+    "Offline": "离线",
+    "Unencrypted": "未加密",
+    "Environment label": "环境标记",
+    "Choose a supported environment label.": "请选择支持的环境标记。",
+    "Copy cell": "复制单元格",
+    "Copy selection": "复制选区",
+    "View value": "查看内容",
+    "Copy value": "复制内容",
+    "Cell details": "单元格详情",
+    "Close cell details": "关闭单元格详情",
+    "Click a cell; Shift+click selects a range. Cmd/Ctrl+C copies.": "点击单元格；Shift+点击选择区域，Cmd/Ctrl+C 复制。",
+    "Double-click a cell to view its full value.": "双击单元格查看完整内容。",
+    "Row {0} · {1}": "第 {0} 行 · {1}",
+    "{0} × {1} selected": "已选 {0} 行 × {1} 列",
+    "Resize {0}": "调整 {0} 列宽",
+    "Drag to resize; double-click to reset. Arrow keys adjust width.": "拖动调整列宽；双击恢复，方向键可微调。",
+    "Copied": "已复制",
+    "Could not copy. Try again.": "复制失败，请重试。",
+
     "DRDS requires a single-shard plan. Add or narrow the shard-key condition.": "DRDS 查询涉及多个分片，请补充或收紧分片键条件。",
     "DRDS shard count is unknown. Check EXPLAIN SHARDING before running.": "DRDS 分片数尚未核实，请检查 EXPLAIN SHARDING。",
     "DRDS physical plan is incomplete. Use one table and verify EXPLAIN EXECUTE.": "DRDS 物理计划不完整，请使用单表并核对 EXPLAIN EXECUTE。",

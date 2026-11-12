@@ -15,7 +15,7 @@ function create(language='en') {
     contains(target){return this===target || this.children.includes(target);}
   }
   const get=id=>{if(!ids.has(id))ids.set(id,new Element());return ids.get(id);};
-  for(const name of ['name','group','channel','engine','host','port','user','password','database','sslMode','authMode','region','accessKeyId','accessKeySecret','keyword','profile','schema','databaseId','searchHint','environment','dmsEngine']) fields[name]=Object.assign(new Element(),{name});
+  for(const name of ['name','group','channel','engine','host','port','user','password','database','sslMode','jdbcEnvironment','authMode','region','accessKeyId','accessKeySecret','keyword','profile','schema','databaseId','searchHint','environment','dmsEngine']) fields[name]=Object.assign(new Element(),{name});
   for(const [key,value] of Object.entries({channel:'jdbc',engine:'mysql',port:'3306',sslMode:'VERIFY_IDENTITY',authMode:'accessKey',region:'cn-hangzhou',environment:'product'}))fields[key].value=value;
   ids.set('dms-database-input',fields.keyword);
   get('dms-database-control').children=[fields.keyword,get('dms-search')];
@@ -23,7 +23,7 @@ function create(language='en') {
   form.addEventListener=(name,fn)=>events[name]=fn;
   const document={documentElement:{lang:language},body:{dataset:{view:'connect'}},getElementById:get,createElement:()=>new Element(),addEventListener:(name,fn)=>listeners[name]=fn};
   class FormData {
-    constructor(){const names=['name','group','region',...(fields.channel.value==='dms'?(fields.authMode.value==='accessKey'?['keyword','accessKeyId','accessKeySecret']:['profile','schema','databaseId','searchHint','environment','dmsEngine']):['engine','host','port','user','password','database','sslMode'])];this.entries=names.map(name=>[name,fields[name].value]);}
+    constructor(){const names=['name','group','region',...(fields.channel.value==='dms'?(fields.authMode.value==='accessKey'?['keyword','accessKeyId','accessKeySecret']:['profile','schema','databaseId','searchHint','environment','dmsEngine']):['engine','host','port','user','password','database','sslMode','jdbcEnvironment'])];this.entries=names.map(name=>[name,fields[name].value]);}
     [Symbol.iterator](){return this.entries[Symbol.iterator]();}
   }
   const context=vm.createContext({document,window:{addEventListener:(name,fn)=>events[name]=fn},FormData,Option:class {constructor(text,value){this.textContent=text;this.value=value;}},acquireVsCodeApi:()=>({postMessage:m=>sent.push(JSON.parse(JSON.stringify(m)))})});
@@ -150,4 +150,10 @@ test('instance browsing is lazy, paginated, environment-aware and retains AK and
   view.receive({type:'error',message:'fixture save error'});view.get('dms-search').onclick();
   view.receive({type:'dmsInstances',instances:[instance],page:1,more:false});
   assert.equal(view.get('dms-instances').children.length,1);assert.equal(view.get('dms-selected-databases').children.length,2);
+});
+
+test('JDBC environment is an optional display label; editing restores it without affecting DMS fields',()=>{
+ const view=create('zh-cn');view.fields.jdbcEnvironment.value='test';view.submit();assert.equal(view.sent.at(-1).values.environment,'test');assert.equal(view.sent.at(-1).values.jdbcEnvironment,undefined);
+ view.receive({type:'configure',connection:{channel:'jdbc',name:'Fixture',host:'fixture.invalid',port:3306,database:'sandbox',engine:'mysql',environment:'product'}});
+ assert.equal(view.fields.jdbcEnvironment.value,'product');
 });

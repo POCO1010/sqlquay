@@ -333,12 +333,15 @@ for(const language of ['zh-cn','en']) test('connection routing, safety gates, ho
   window.activeTextEditor={document:directDoc,selection:{active:0}};
   await run('bindConnection'); // Rebind explicitly after the TLS change.
   await run('edit',updated);
-  await panels.at(-1).receive({type:'save',values:{...values,name:'Renamed JDBC',group:'Renamed group'}});
+  await panels.at(-1).receive({type:'save',values:{...values,name:'Renamed JDBC',group:'Renamed group',environment:'test'}});
   const renamed=tree.getChildren().find(x=>x.kind==='group');
   const renamedJdbc=tree.getChildren(renamed).find(x=>x.connection.id===jdbc.id);
   assert.equal(renamedJdbc.connection.revision,updated.connection.revision);
   assert.deepEqual((await run('run')).rows,[['jdbc']]);
   assert.match(currentPanel().messages.at(-1).target,/Renamed JDBC/);
+  assert.equal(currentPanel().messages.at(-1).connectionInfo.environment,'test');
+  assert.equal(currentPanel().messages.at(-1).connectionInfo.channel,'jdbc');
+  assert.equal(currentPanel().messages.at(-1).connectionInfo.unencrypted,true);
   assert.match(status.text,/Renamed JDBC/);
   await run('edit',dmsNode);
   await panels.at(-1).receive({type:'save',values:{...dmsNode.connection,name:'Renamed DMS'}});
@@ -421,6 +424,16 @@ for(const language of ['zh-cn','en']) test('connection routing, safety gates, ho
   assert.deepEqual(copied,['jdbc']);
   await ownResult.receive({type:'pin',runId:ownId+1});
   assert.equal(ownResult.messages.at(-1).pinned,false);
+  const beforeCopy=calls.length;
+  for(const input of [{runId:ownId+1,rows:[0],from:0,to:0},{runId:ownId,rows:[1],from:0,to:0},{runId:ownId,rows:[0],from:0,to:1}]) await ownResult.receive({type:'copySelection',...input});
+  assert.deepEqual(copied,['jdbc']);
+  await ownResult.receive({type:'copySelection',runId:ownId,rows:[0],from:0,to:0});
+  assert.deepEqual(copied,['jdbc','jdbc']);assert.equal(ownResult.messages.at(-1).type,'copied');
+  const writeClipboard=vscode.env.clipboard.writeText;vscode.env.clipboard.writeText=async()=>{throw Error('fixture clipboard failure');};
+  await ownResult.receive({type:'copySelection',runId:ownId,rows:[0],from:0,to:0});
+  assert.equal(ownResult.messages.at(-1).type,'copyError');vscode.env.clipboard.writeText=writeClipboard;
+  assert.equal(calls.length,beforeCopy);await ownResult.receive({type:'ready'});
+
   const beforeTrust=calls.length;
   vscode.workspace.isTrusted=false;
   concurrentEditor.document.text='SELECT 1 AS probe;';

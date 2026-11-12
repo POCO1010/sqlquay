@@ -136,7 +136,7 @@
           values.keyword=form.elements.searchHint.value.trim()||values.database;
         }
         delete values.schema;delete values.searchHint;
-      }
+      } else {values.environment=values.jdbcEnvironment;delete values.jdbcEnvironment;}
       const type=e.submitter?.value==='save'?'save':'connect';
       feedback.textContent=type==='connect' && !(values.channel==='dms' && values.authMode==='accessKey')?tr('Checking connection…'):tr('Saving…');working(true);
       vscode.postMessage({type,values});form.elements.password.value='';
@@ -146,7 +146,7 @@
       if(m?.type==='configure' && m.connection) {
         const {channel,name,group,database,engine:kind,host,port,keyword,databaseId,sslMode,profile,region,environment,authMode:auth}=m.connection;
         $('heading').textContent=m.adding?tr('Add databases'):tr('Edit connection');editing=true;form.elements.channel.value=channel;
-        const values=channel==='dms'?{name,group,schema:database,keyword:'',searchHint:keyword===database?'':keyword,databaseId,region:region??'cn-hangzhou',authMode:auth??'profile',environment:environment??'product',dmsEngine:kind??''}:{name,group,database,engine:kind,host,port,sslMode:sslMode??'VERIFY_IDENTITY'};
+        const values=channel==='dms'?{name,group,schema:database,keyword:'',searchHint:keyword===database?'':keyword,databaseId,region:region??'cn-hangzhou',authMode:auth??'profile',environment:environment??'product',dmsEngine:kind??''}:{name,group,database,engine:kind,host,port,sslMode:sslMode??'VERIFY_IDENTITY',jdbcEnvironment:environment??''};
         for(const [key,value] of Object.entries(values)) form.elements[key].value=value??'';
         if(channel==='jdbc') {form.elements.user.required=false;form.elements.user.placeholder=tr('Leave blank to keep credentials');engine=kind;}
         if(channel==='dms' && authMode()==='profile') {$('dms-search-options').open=keyword!==database;form.elements.profile.add(new Option(profile??'dms-prod',profile??'dms-prod',true,true));loadProfiles();}
@@ -203,7 +203,7 @@
     });
     working(false);
   } else {
-    let data = [], cols = [], numericColumns = [], preview = false, page = 0, sort = null, selected = null, runId = 0, truncated = false;
+    let data = [], cols = [], numericColumns = [], preview = false, page = 0, sort = null, selected = null, runId = 0, truncated = false, anchor=null, focusCell=null, shown=[], widths=[], detailCell=null;
     const statement = $('statement'), filter = $('filter'), size = $('size'), message = $('message');
     const head = document.querySelector('thead'), body = document.querySelector('tbody');
     const collator = new Intl.Collator(undefined,{numeric:true,sensitivity:'base'});
@@ -232,46 +232,113 @@
       if (className) el.className = className;
       return el;
     };
+    const bounds=()=>anchor && focusCell ? {top:Math.min(anchor.row,focusCell.row),bottom:Math.max(anchor.row,focusCell.row),from:Math.min(anchor.col,focusCell.col),to:Math.max(anchor.col,focusCell.col)} : null;
+    const clearRange=()=>{anchor=focusCell=null;};
+    const copyRange=()=>{
+      const range=bounds();
+      if(range) vscode.postMessage({type:'copySelection',runId,rows:shown.slice(range.top,range.bottom+1).map(item=>item.index),from:range.from,to:range.to});
+    };
+    const applyWidth=(element,col)=>{for(const key of ['width','minWidth','maxWidth']) element.style[key]=widths[col]===undefined?'':widths[col]+'px';};
+    const resizeColumn=(col,value)=>{
+      widths[col]=value;
+      applyWidth(head.rows[0].cells[col+1],col);
+      for(const row of body.rows) applyWidth(row.cells[col+1],col);
+      head.rows[0].cells[col+1].children[1].setAttribute('aria-valuenow',Math.round(head.rows[0].cells[col+1].getBoundingClientRect().width));
+    };
+    const chooseCell=(row,col,extend=false)=>{
+      if(!extend || !anchor) anchor={row,col};
+      focusCell={row,col};selected=shown[row].index;paintSelection();body.rows[row].cells[col+1].focus();
+    };
+    const openValue=(row,col)=>{
+      chooseCell(row,col);detailCell={row:shown[row].index,col};
+      $('cell-heading').textContent=tr('Row {0} · {1}',detailCell.row+1,cols[col].name||tr('(unnamed)'));
+      $('cell-value').textContent=display(data[detailCell.row][col]);$('cell-detail').hidden=false;$('cell-value').focus();
+    };
+    $('copy-selection').onclick=copyRange;
+    $('grid').oncopy=e=>{if(bounds()){e.preventDefault();copyRange();}};
+    $('view-value').onclick=()=>{if(focusCell) openValue(focusCell.row,focusCell.col);};
+    $('close-value').onclick=()=>{$('cell-detail').hidden=true;if(focusCell) body.rows[focusCell.row]?.cells[focusCell.col+1]?.focus();};
+    $('copy-value').onclick=()=>{if(detailCell) vscode.postMessage({type:'copySelection',runId,rows:[detailCell.row],from:detailCell.col,to:detailCell.col});};
+    $('cell-detail').onkeydown=e=>{if(e.key==='Escape') {$('close-value').onclick();e.preventDefault();}};
+    function paintSelection() {
+      const range=bounds();
+      $('copy').disabled=selected===null || !data[selected];
+      $('copy-selection').disabled=!range;$('view-value').disabled=!focusCell;
+      $('copy-selection').textContent=range && (range.top!==range.bottom || range.from!==range.to)?tr('Copy selection'):tr('Copy cell');
+      $('selection-status').textContent=range?tr('{0} × {1} selected',range.bottom-range.top+1,range.to-range.from+1):'';
+      for(const [position,row] of [...body.rows].entries()) {
+        row.classList.toggle('selected',shown[position].index===selected && !range);
+        row.setAttribute('aria-selected',String(shown[position].index===selected && !range));
+        for(let col=0;col<cols.length;col++) {
+          const td=row.cells[col+1],inRange=!!range && position>=range.top && position<=range.bottom && col>=range.from && col<=range.to;
+          td.classList.toggle('cell-selected',inRange);td.setAttribute('role','gridcell');td.setAttribute('aria-selected',String(inRange));
+          td.tabIndex=focusCell ? position===focusCell.row && col===focusCell.col?0:-1 : position===0 && col===0?0:-1;
+        }
+      }
+    }
     function draw() {
       const needle = filter.value.toLocaleLowerCase(), perPage = Number(size.value);
       const visible = data.map((row,index)=>({row,index})).filter(({row})=>!needle || row.some(v=>display(v).toLocaleLowerCase().includes(needle)));
       if (sort) visible.sort((a,b)=>sort.sign * compare(a.row[sort.index],b.row[sort.index],numericColumns[sort.index]) || a.index - b.index);
       const pageCount = Math.max(1,Math.ceil(visible.length/perPage)); page = Math.min(page,pageCount - 1);
+      shown=visible.slice(page*perPage,(page+1)*perPage);
+      const range=bounds();
       $('page').textContent = `${page + 1} / ${pageCount}`;
       $('total').textContent = (needle ? tr('Matched {0} / ',visible.length) : '') + tr('Loaded {0} rows',data.length) +
         (preview ? tr(" · Preview limit: 100 rows") : '') + (truncated ? tr(" · Truncated") : '');
       $('prev').disabled = page === 0; $('next').disabled = page >= pageCount-1;
-      $('copy').disabled = selected === null || !visible.some(({index})=>index === selected);
       const header = document.createElement('tr'); header.append(cell('th','#','number'));
       for (const [index,column] of cols.entries()) {
         const th = document.createElement('th'), label = cell('button',column.name || tr("(unnamed)"));
-        th.setAttribute('scope','col');
+        th.setAttribute('scope','col');applyWidth(th,index);
         label.setAttribute('aria-label',column.name || tr("(unnamed)"));
         if (sort?.index === index) { th.setAttribute('aria-sort',sort.sign > 0 ? 'ascending':'descending'); label.append(sort.sign > 0 ? ' ↑':' ↓'); }
         if (column.type) label.title = column.type;
         label.onclick = () => {
-          sort = {index,sign:sort?.index === index ? -sort.sign : 1}; page=0; draw(); head.rows[0].cells[index+1].firstElementChild.focus();
+          sort = {index,sign:sort?.index === index ? -sort.sign : 1}; page=0;clearRange();draw();head.rows[0].cells[index+1].firstElementChild.focus();
         };
-        th.append(label); header.append(th);
+        const handle=document.createElement('span');handle.className='column-resize';handle.tabIndex=0;
+        handle.setAttribute('role','separator');handle.setAttribute('aria-orientation','vertical');handle.setAttribute('aria-label',tr('Resize {0}',column.name||tr('(unnamed)')));
+        handle.title=tr('Drag to resize; double-click to reset. Arrow keys adjust width.');
+        handle.setAttribute('aria-valuemin',72);handle.setAttribute('aria-valuenow',widths[index]??88);
+        handle.onfocus=()=>handle.setAttribute('aria-valuenow',Math.round(th.getBoundingClientRect().width));
+        let drag;
+        handle.onpointerdown=e=>{if(e.button!==0)return;e.preventDefault();e.stopPropagation();drag={id:e.pointerId,x:e.clientX,width:th.getBoundingClientRect().width};handle.setPointerCapture(e.pointerId);};
+        handle.onpointermove=e=>{if(drag?.id===e.pointerId) resizeColumn(index,Math.max(72,Math.round(drag.width+e.clientX-drag.x)));};
+        handle.onpointerup=e=>{if(drag?.id===e.pointerId){handle.releasePointerCapture(e.pointerId);drag=undefined;}};
+        handle.onpointercancel=()=>{drag=undefined;};
+        handle.ondblclick=e=>{e.stopPropagation();resizeColumn(index,undefined);};
+        handle.onkeydown=e=>{if(['ArrowLeft','ArrowRight','Home'].includes(e.key)){e.preventDefault();e.stopPropagation();resizeColumn(index,e.key==='Home'?undefined:Math.max(72,(widths[index]??th.getBoundingClientRect().width)+(e.key==='ArrowRight'?16:-16)));}};
+        th.append(label,handle); header.append(th);
       }
       head.replaceChildren(...(cols.length ? [header] : []));
-      body.replaceChildren(...visible.slice(page*perPage,(page+1)*perPage).map(({row,index})=>{
+      body.replaceChildren(...shown.map(({row,index},position)=>{
         const tr = document.createElement('tr'); tr.append(cell('th',index+1,'number'));
-        if (index === selected) tr.classList.add('selected');
+        if (index === selected && !range) tr.classList.add('selected');
         tr.tabIndex=0;
-        const choose = () => { selected=index; draw(); body.querySelector('.selected')?.focus(); };
+        const choose = () => { selected=index;clearRange();paintSelection();body.rows[position].focus(); };
         tr.onclick = choose;
-        tr.onkeydown = e => { if(e.key==='Enter' || e.key===' ') {e.preventDefault();choose();} };
-        for (const value of row) {
-          const td = cell('td',display(value),value === null?'null':''); td.title=display(value); tr.append(td);
+        tr.onkeydown = e => { if(e.target===tr && (e.key==='Enter' || e.key===' ')) {e.preventDefault();choose();} };
+        for (const [col,value] of row.entries()) {
+          const td = cell('td',display(value),value === null?'null':''); td.title=display(value);applyWidth(td,col);
+          td.onclick=e=>{e.stopPropagation();chooseCell(position,col,e.shiftKey);};
+          td.ondblclick=e=>{e.stopPropagation();openValue(position,col);};
+          td.onkeydown=e=>{
+            if((e.ctrlKey||e.metaKey) && e.key.toLowerCase()==='c'){e.preventDefault();if(!focusCell)chooseCell(position,col);copyRange();return;}
+            if(e.key==='Enter' || e.key==='F2'){e.preventDefault();e.stopPropagation();openValue(position,col);return;}
+            const steps={ArrowUp:[-1,0],ArrowDown:[1,0],ArrowLeft:[0,-1],ArrowRight:[0,1]},step=steps[e.key];
+            if(step){e.preventDefault();chooseCell(Math.max(0,Math.min(shown.length-1,position+step[0])),Math.max(0,Math.min(cols.length-1,col+step[1])),e.shiftKey);}
+          };
+          tr.append(td);
         }
         return tr;
       }));
+      paintSelection();
     }
-    filter.oninput = () => {page=0;selected=null;draw();};
-    size.onchange = () => {page=0;draw();};
-    $('prev').onclick = () => {page--;draw();};
-    $('next').onclick = () => {page++;draw();};
+    filter.oninput = () => {page=0;selected=null;clearRange();draw();};
+    size.onchange = () => {page=0;clearRange();draw();};
+    $('prev').onclick = () => {page--;clearRange();draw();};
+    $('next').onclick = () => {page++;clearRange();draw();};
     $('copy').onclick = () => {if (selected!==null) vscode.postMessage({type:'copy',runId,row:selected});};
     $('pin').onclick = () => vscode.postMessage({type:'pin',runId});
     $('history').onclick = () => vscode.postMessage({type:'history',runId});
@@ -279,10 +346,17 @@
     $('run').onclick = execute;
     statement.onkeydown = e => { if ((e.ctrlKey || e.metaKey) && e.key==='Enter') {e.preventDefault();execute();} };
     window.addEventListener('message', ({data:m}) => {
+      if(m?.runId===runId && ['copied','copyError'].includes(m.type)) {$('selection-status').textContent=tr(m.type==='copied'?'Copied':'Could not copy. Try again.');return;}
       if (!m || !Number.isInteger(m.id) || m.id < runId) return;
-      if (m.id !== runId) { selected=null;sort=null;page=0;filter.value='';statement.value=m.sql; }
+      if (m.id !== runId) { selected=null;sort=null;page=0;clearRange();widths=[];detailCell=null;$('cell-detail').hidden=true;$('cell-value').textContent='';filter.value='';statement.value=m.sql; }
       runId = m.id;
-      $('target').textContent = m.target;
+      const info=m.connectionInfo,environmentNames={product:'Production',test:'Test',dev:'Development',pre:'Pre-release',sit:'SIT',uat:'UAT',pet:'Load test',stag:'Staging',demo:'Offline'};
+      $('target').textContent=info?.name??m.target;$('target').title=m.target;
+      $('channel-badge').hidden=!info;$('channel-badge').textContent=info?.channel?.toUpperCase()??'';
+      $('environment-badge').hidden=!info;$('environment-badge').textContent=tr(environmentNames[info?.environment]??'Unmarked');
+      $('environment-badge').classList.toggle('production',info?.environment==='product');
+      $('tls-badge').hidden=!info?.unencrypted;
+      for(const [id,value] of [['target-database',info?.database],['target-instance',info?.instance]]) {$(id).textContent=value??'';$(id).title=value??'';$(id).hidden=!value;}
       $('pin').textContent=m.pinned ? tr("Unpin result") : tr("Pin result");
       $('pin').setAttribute('aria-pressed',String(!!m.pinned));
       preview = m.mode==='PREVIEW';

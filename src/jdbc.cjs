@@ -17,7 +17,9 @@ function connectionConfig(input) {
   if (!['mysql','polardb','drds','doris'].includes(engine) || !/^[a-z0-9](?:[a-z0-9.-]{0,251}[a-z0-9])?$/i.test(host) || !Number.isInteger(port) || port < 1 || port > 65535 || !/^[a-z0-9_-]{1,128}$/i.test(database)) throw Error('Enter a host name, port and exact database. JDBC URLs and connection options are not accepted.');
   const sslMode = input.sslMode ?? 'VERIFY_IDENTITY';
   if (!['VERIFY_IDENTITY','DISABLED'].includes(sslMode)) throw Error('Choose a supported JDBC TLS mode.');
-  return {name, group, engine, host, port, database, sslMode};
+  const environment=trim('environment');
+  if(environment && !['product','test','dev','pre','sit','uat','pet','stag'].includes(environment)) throw Error('Choose a supported environment label.');
+  return {name, group, engine, host, port, database, sslMode,...(environment?{environment}:{})};
 }
 function call(command, args, body, onProgress) {
   return new Promise((resolve, reject) => {
@@ -46,7 +48,8 @@ function makeJdbc(settings, extensionPath, transport = call) {
     if (!path.isAbsolute(jar) || !jar.toLowerCase().endsWith('.jar') || jar.includes(path.delimiter)) throw Error('Set dbWorkbench.driverJar to an absolute MySQL Connector/J JAR path.');
     try { accessSync(jar, constants.R_OK); accessSync(guard, constants.R_OK); }
     catch { throw Error('JDBC driver or shared SQL guard is not readable. Check SQLQuay settings.'); }
-    const target = connectionConfig({...connection, port:String(connection.port)});
+    // Display labels do not change the existing transport contract.
+    const target = connectionConfig({...connection, port:String(connection.port), environment:undefined});
     const payload = {url: 'jdbc:mysql://' + target.host + ':' + target.port + '/' + encodeURIComponent(target.database), engine: target.engine, sslMode:target.sslMode,
       user:credentials.user, password:credentials.password, sql:statement, limit,
       ...(table === undefined ? {} : {table,schema:target.database})};

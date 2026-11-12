@@ -29,6 +29,9 @@ test('JDBC validates target and sends credentials over stdin, keeps SQL NULL and
   for(const file of [jar,guard]) fs.writeFileSync(file,'');
   const target=connectionConfig({name:'fixture',host:'localhost',port:'3306',database:'sandbox',engine:'mysql'});
   assert.equal(target.sslMode,'VERIFY_IDENTITY');
+  assert.equal(target.environment,undefined);
+  assert.equal(connectionConfig({...target,port:'3306',environment:'test'}).environment,'test');
+  assert.throws(()=>connectionConfig({...target,port:'3306',environment:'invalid'}),/environment label/);
   assert.throws(()=>connectionConfig({...target,port:'3306',sslMode:'PREFERRED'}),/TLS mode/);
   for(const host of ['example.com?allowMultiQueries=true','localhost:1','a,b']) assert.throws(()=>connectionConfig({...target,port:'3306',host}));
   const settings={jar,guard,java:'java',python:'python3'};
@@ -43,6 +46,7 @@ test('JDBC validates target and sends credentials over stdin, keeps SQL NULL and
   });
   const credentials={user:'reader',password:'fixture-secret'};
   assert.deepEqual((await fake(target,credentials,'SELECT 1 AS probe;')).rows,[['9007199254740993',null]]);
+  assert.deepEqual((await fake({...target,environment:'legacy-custom'},credentials,'SELECT 1 AS probe;')).rows,[['9007199254740993',null]]);
   await assert.rejects(makeJdbc(settings,dir,async()=>({error:'unknown'}))(target,credentials,'SELECT 1'),UnknownState);
 });
 test('webviews load local assets and define the action order',()=>{

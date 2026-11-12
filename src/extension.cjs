@@ -7,7 +7,7 @@ const {makeDms,DmsStopped,dmsCatalog,targetMetadata,dmsConfig,listDmsProfiles,ac
 const {relationAt,tableDdl} = require('./ddl.cjs');
 const {languages,regionAt,selectedSql} = require('./embedded.cjs');
 const {suggestions,ddlColumns} = require('./completion.cjs');
-const {Sessions} = require('./sessions.cjs');
+const {Sessions,copyCells} = require('./sessions.cjs');
 const {connectHtml,resultHtml} = require('./webviews.cjs');
 const {importer}=require('./migration.cjs');
 const path=require('node:path');
@@ -557,7 +557,7 @@ function activate(context) {
         if(edit && channel==='dms' && authMode(edit)!==authMode(message.values)) throw Error('To change DMS authentication, create a new connection.');
         const multiple=channel==='dms' && Array.isArray(message.values.databases);
         if(isDmsAccount(prior) && !multiple) throw Error('Choose one or more databases for this AccessKey connection.');
-        let data=multiple ? dmsAccountConfig(message.values,{allowEmpty:!!edit}) : channel==='dms' ? dmsConfig(message.values) : connectionConfig(message.values);
+        let data=multiple ? dmsAccountConfig(message.values,{allowEmpty:!!edit}) : channel==='dms' ? dmsConfig(message.values) : connectionConfig({...message.values,environment:message.values.environment??edit?.environment});
         const previousTargets=prior ? dmsTargets(prior) : [];
         const removals=message.values.removedDatabases??[];
         if(!Array.isArray(removals) || (removals.length && (!multiple || !edit))) throw Error('The database selection changed. Reopen the connection and choose the databases again.');
@@ -749,6 +749,12 @@ function activate(context) {
       if(message.type==='run' && entry.view.mode!=='PREVIEW' && typeof message.sql==='string' && !running) {
         void run(entry.target,message.sql).catch(error=>void window.showErrorMessage(tr(error.message)));
       }
+      if(message.type==='copySelection') {
+        const text=copyCells(entry.view.result,message);
+        if(text!==undefined) void vscode.env.clipboard.writeText(text).then(
+          ()=>panel.webview.postMessage({type:'copied',runId:entry.view.id}),
+          ()=>panel.webview.postMessage({type:'copyError',runId:entry.view.id}));
+      }
       if(message.type==='copy' && Number.isInteger(message.row) && entry.view.result?.rows[message.row]) {
         void vscode.env.clipboard.writeText(entry.view.result.rows[message.row].map(v=>v===null?'NULL':v.replace(/[\t\r\n]+/g,' ')).join('\t'));
       }
@@ -774,6 +780,8 @@ function activate(context) {
     if(table===undefined) readonly(sql);
     const start=performance.now(), id=++serial;
     const entry=sessions.add({target:connection,view:{id,state:'running',sql,mode,
+      connectionInfo:{name:connectionName(connection),database:connection.database,instance:connection.instanceName??'',channel:channelOf(connection),
+        environment:channelOf(connection)==='demo'?'demo':connection.environment??(channelOf(connection)==='dms'?'product':''),unencrypted:channelOf(connection)==='jdbc' && connection.sslMode==='DISABLED'},
       target:connectionName(connection)+' / '+connection.database+(channelOf(connection)==='demo'?'':' · '+channelLabel(connection))+(targetLabel(connection)?' · '+targetLabel(connection):'')}});
     running=true;
     try {

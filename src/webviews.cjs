@@ -30,6 +30,7 @@ function connectHtml(assets) {
 <label>${h("Username")} <input required name="user" autocomplete="username" maxlength="256" placeholder="${h("Read-only user")}"></label>
 <label>${h("Password")} <input name="password" type="password" autocomplete="current-password" maxlength="1024" placeholder="${h("Password")}"></label>
 <label>${h("Database")} <input required name="database" maxlength="128" placeholder="${h("Exact database name")}"></label>
+<label>${h('Environment label')} <select name="jdbcEnvironment"><option value="">${h('Unmarked')}</option><option value="product">${h('Production')}</option><option value="test">${h('Test')}</option><option value="dev">${h('Development')}</option><option value="pre">${h('Pre-release')}</option><option value="sit">SIT</option><option value="uat">UAT</option><option value="pet">${h('Load test')}</option><option value="stag">${h('Staging')}</option></select></label>
 <label>TLS <select name="sslMode" aria-label="TLS">
 <option value="VERIFY_IDENTITY">${h("Verify server identity")}</option>
 <option value="DISABLED">${h("Disabled (unencrypted)")}</option>
@@ -86,12 +87,15 @@ function connectHtml(assets) {
 function resultHtml(assets) {
   const tr=translator(assets.language), h=value=>esc(tr(value));
   return document({...assets,kind:'result'}, `<main class="result">
-<header class="result-tabs"><span class="tab active" id="mode">${h("Data")}</span><span id="target" class="subdued"></span><span class="readonly">${h("Read-only")}</span></header>
+<header class="result-tabs"><span class="tab active" id="mode">${h("Data")}</span><span id="environment-badge" class="target-badge" hidden></span><span id="channel-badge" class="target-badge" hidden></span><span id="tls-badge" class="target-badge warning" hidden>${h('Unencrypted')}</span><div class="target-context"><span id="target" class="subdued"></span><span id="target-instance" class="subdued" hidden></span><span id="target-database" hidden></span></div><span class="readonly">${h("Read-only")}</span></header>
 <div class="query-line"><textarea id="statement" aria-label="SQL" spellcheck="false" rows="1"></textarea><button id="run" title="${h("Run SQL")}">▶ ${h("Run")}</button></div>
 <div class="toolbar" aria-label="${h('Result controls')}">
 <button id="pin" class="plain" title="${h("Keep in session history when pinned.")}" aria-pressed="false">${h("Pin result")}</button>
 <button id="history" class="plain">${h("Session history")}</button>
 <label class="search"><span aria-hidden="true">⌕</span><input id="filter" aria-label="${h("Search Results")}" placeholder="${h("Search Results")}"></label>
+<button id="copy-selection" class="plain" title="${h('Click a cell; Shift+click selects a range. Cmd/Ctrl+C copies.')}" disabled>${h('Copy cell')}</button>
+<button id="view-value" class="plain" title="${h('Double-click a cell to view its full value.')}" disabled>${h('View value')}</button>
+<span id="selection-status" class="subdued" role="status"></span>
 <button id="copy" class="plain" title="${h("Copy selected row as TSV")}" disabled>${h("Copy row")}</button>
 <span class="separator" aria-hidden="true"></span>
 <button id="prev" class="plain step" aria-label="${h("Previous page")}">‹</button><span id="page">1</span><button id="next" class="plain step" aria-label="${h("Next page")}">›</button>
@@ -101,7 +105,8 @@ function resultHtml(assets) {
 <div id="phases" class="subdued" title="${h("Phase times come from the execution wrapper. Other time includes local processing, transfer and cleanup. Only measured values are shown.")}" hidden></div>
 <div id="message" role="status" aria-live="polite" hidden></div>
 <div id="diagnostic" class="subdued" role="note" hidden></div>
-<div class="grid" id="grid"><table aria-label="${h("SQL results")}"><thead></thead><tbody></tbody></table></div>
+<div class="result-content"><div class="grid" id="grid"><table role="grid" aria-multiselectable="true" aria-label="${h("SQL results")}"><thead></thead><tbody></tbody></table></div>
+<aside id="cell-detail" aria-label="${h('Cell details')}" hidden><header><strong id="cell-heading"></strong><button id="copy-value" class="plain">${h('Copy value')}</button><button id="close-value" class="plain" aria-label="${h('Close cell details')}">×</button></header><pre id="cell-value" tabindex="0"></pre></aside></div>
 </main>`);
 }
 module.exports = {connectHtml,resultHtml};
