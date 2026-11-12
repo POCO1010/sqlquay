@@ -10,11 +10,12 @@ const rules=[
   ['private key', /-----BEGIN (?:RSA |EC |OPENSSH )?PRIVATE KEY-----/],
   ['email address', /\b[A-Z0-9._%+-]+@(?!users\.noreply\.github\.com\b)[A-Z0-9.-]+\.[A-Z]{2,}\b/i],
 ];
-function issues(text) {
-  const found=[];
+function issues(text,file='') {
+  const found=[],passwordLabel=['"Password"','"密码",'].join(': ');
   for(const [index,line] of text.split(/\r?\n/).entries()) {
     for(const [kind,pattern] of rules)if(pattern.test(line))found.push({line:index+1,kind});
     for(const m of line.matchAll(/\bpassword["']?\s*[:=]\s*(["'])([^"'\r\n]*)\1/gi)) {
+      if(file==='media/i18n.js' && line.trim()===passwordLabel) continue;
       if(!['','fixture','fixture-secret','synthetic','ignored'].includes(m[2]))found.push({line:index+1,kind:'literal password'});
     }
   }
@@ -28,7 +29,7 @@ if(require.main===module) {
   for(const file of files) {
     const data=fs.readFileSync(path.join(root,file));
     if(data.includes(0))continue;
-    for(const issue of issues(data.toString('utf8'))) {
+    for(const issue of issues(data.toString('utf8'),file)) {
       console.error(`${file}:${issue.line}: ${issue.kind}`);failures++;
     }
   }

@@ -11,14 +11,17 @@ const {Sessions} = require('./sessions.cjs');
 const {connectHtml,resultHtml} = require('./webviews.cjs');
 const {importer}=require('./migration.cjs');
 const path=require('node:path');
+const {translator}=require('../media/i18n.js');
 
 // Version 0.1.0 stored JDBC connections without a channel field.
 const channelOf = c => c.engine === 'demo' ? 'demo' : c.channel === 'dms' ? 'dms' : 'jdbc';
-const channelLabel = c => channelOf(c) === 'demo' ? 'offline'
-  : channelOf(c) === 'jdbc' && c.sslMode === 'DISABLED' ? 'JDBC · Unencrypted' : channelOf(c).toUpperCase();
 const targetSignature = c => JSON.stringify([channelOf(c),c.engine,c.host,c.port,c.database,c.databaseId,c.sslMode??'VERIFY_IDENTITY',...(channelOf(c)==='dms' ? [c.profile??'dms-prod',c.region??'cn-hangzhou'] : [])]);
 
 function activate(context) {
+  const tr=translator(vscode.env?.language);
+  const connectionName=c=>c.id==='demo' ? tr('Local Demo') : c.name;
+  const channelLabel=c=>channelOf(c)==='demo' ? tr('offline') : channelOf(c)==='jdbc' && c.sslMode==='DISABLED' ? tr('JDBC · Unencrypted') : channelOf(c).toUpperCase();
+  const modeLabel=mode=>({DATA:tr('Data'),PROPERTIES:tr('Properties'),PREVIEW:tr('Preview data')}[mode] ?? mode);
   const {window,workspace,commands,TreeItem,TreeItemCollapsibleState: State,ThemeIcon,Uri} = vscode;
   const bindings = new WeakMap(), tables = new Map([['demo',['products']]]);
   const columns = new Map([['demo',new Map([['products',demoQuery('DESCRIBE products').rows]])]]);
@@ -29,13 +32,13 @@ function activate(context) {
   const all = () => [DEMO,...context.globalState.get('connections',[])];
   const live = old => {
     const current = all().find(item => item.id === old.id);
-    if (!current || current.revision !== old.revision) throw Error('连接目标或认证已变更，请为当前文件重新选择执行连接。');
+    if (!current || current.revision !== old.revision) throw Error(tr("Connection target or credentials changed. Choose an execution connection for this file again."));
     return current;
   };
   function getTarget(node) {
     const id = node?.connection?.id ?? activeId;
     const connection = all().find(c => c.id === id);
-    if (!connection) throw Error('This connection is no longer available.');
+    if (!connection) throw Error(tr("This connection is no longer available."));
     return connection;
   }
 
@@ -53,38 +56,38 @@ function activate(context) {
       item.contextValue = node.connection?.id === 'demo' && node.kind === 'connection' ? 'dbw-schema' : 'dbw-' + node.kind;
       if (node.kind === 'ddlDefault') {
         const selection=workspaceDdl();
-        item.description='未设置';
+        item.description=tr("Not set");
         if (selection) {
-          try { item.description=live(selection).name; } catch { item.description='连接已变更，请重新选择'; }
+          try { item.description=live(selection).name; } catch { item.description=tr("Connection changed; choose again"); }
         }
-        item.tooltip='点击选择此工作区的 DDL 默认预览连接。单文件设置优先，不影响 Run SQL。';
-        item.command={command:'dbw.' + workspaceDdlCommand,title:'设置工作区默认表定义预览连接'};
+        item.tooltip=tr("Choose the workspace default DDL preview connection. File-specific choices take priority; Run SQL is not affected.");
+        item.command={command:'dbw.' + workspaceDdlCommand,title:tr("Set Workspace Default DDL Preview Connection")};
       }
       if (node.kind === 'connection') item.description = channelLabel(node.connection);
-      if (node.kind === 'tables') item.description = tables.has(node.connection.id) ? String(tables.get(node.connection.id).length) : 'Load tables ↗';
+      if (node.kind === 'tables') item.description = tables.has(node.connection.id) ? String(tables.get(node.connection.id).length) : tr("Load tables ↗");
       if (node.kind === 'column') item.description = node.type;
-      if (node.kind === 'table') item.command = {command:'dbw.describe',title:'Properties',arguments:[node]};
+      if (node.kind === 'table') item.command = {command:'dbw.describe',title:tr("Properties"),arguments:[node]};
       return item;
     },
     getParent(node) {
       const c=node.connection;
-      if(node.kind==='table') return {kind:'tables',label:'Tables',connection:c};
+      if(node.kind==='table') return {kind:'tables',label:tr("Tables"),connection:c};
       if(node.kind==='tables') return {kind:'schema',label:c.database,connection:c};
-      if(node.kind==='schema') return {kind:'connection',label:c.name,connection:c};
+      if(node.kind==='schema') return {kind:'connection',label:connectionName(c),connection:c};
       if(node.kind==='connection' && c.group) return {kind:'group',label:c.group};
     },
     getChildren(node) {
       const c = node?.connection;
-      const connectionNode = connection => ({kind:'connection',label:connection.name,connection});
+      const connectionNode = connection => ({kind:'connection',label:connectionName(connection),connection});
       if (!node) {
         const connections = all();
         const groups = [...new Set(connections.map(x=>x.group).filter(Boolean))];
-        const settings=workspace.workspaceFolders?.length ? [{kind:'ddlDefault',label:'DDL 默认预览连接'}] : [];
+        const settings=workspace.workspaceFolders?.length ? [{kind:'ddlDefault',label:tr("Default DDL preview connection")}] : [];
         return [...settings,...connections.filter(x=>!x.group).map(connectionNode),...groups.map(label=>({kind:'group',label}))];
       }
       if (node.kind === 'group') return all().filter(x=>x.group===node.label).map(connectionNode);
       if (node.kind === 'connection') return [{kind:'schema',label:c.database,connection:c}];
-      if (node.kind === 'schema') return [{kind:'tables',label:'Tables',connection:c}];
+      if (node.kind === 'schema') return [{kind:'tables',label:tr("Tables"),connection:c}];
       if (node.kind === 'tables') return (tables.get(c.id) ?? []).map(label=>({kind:'table',label,connection:c}));
       if (node.kind === 'table') return (columns.get(c.id)?.get(node.label) ?? []).map(([label,type])=>({kind:'column',label,type,table:node.label,connection:c}));
       return [];
@@ -96,19 +99,19 @@ function activate(context) {
   function register(name, callback) {
     context.subscriptions.push(commands.registerCommand('dbw.' + name, async (...args) => {
       try {
-        if(importing) throw Error('Wait for the legacy migration to finish.');
+        if(importing) throw Error(tr("Wait for the legacy migration to finish."));
         return await callback(...args);
       }
-      catch (error) { void window.showErrorMessage('SQLQuay: ' + error.message); }
+      catch (error) { void window.showErrorMessage('SQLQuay: ' + tr(error.message)); }
     }));
   }
   const cfg = () => workspace.getConfiguration('dbWorkbench');
   const secretKey = id => 'jdbc:' + id;
   async function credentialsFor(connection) {
     const raw = await context.secrets.get(secretKey(connection.id));
-    if (!raw) throw Error('Edit this connection to enter its read-only credentials.');
+    if (!raw) throw Error(tr("Edit this connection to enter its read-only credentials."));
     const value = JSON.parse(raw);
-    if (typeof value?.user !== 'string' || typeof value?.password !== 'string') throw Error('Saved credentials are unavailable.');
+    if (typeof value?.user !== 'string' || typeof value?.password !== 'string') throw Error(tr("Saved credentials are unavailable."));
     return value;
   }
   const pendingChannel = () => context.globalState.get('jdbcPending',false) ? 'JDBC'
@@ -119,11 +122,11 @@ function activate(context) {
       if (table === 'products') return demoQuery('SELECT id, name, category, price FROM products LIMIT 100');
       return demoQuery(sql);
     }
-    if (!workspace.isTrusted) throw Error('Online queries are disabled in untrusted workspaces.');
-    if(importing) throw Error('Wait for the legacy migration to finish.');
-    if (online) throw Error('An online operation is already running.');
+    if (!workspace.isTrusted) throw Error(tr("Online queries are disabled in untrusted workspaces."));
+    if(importing) throw Error(tr("Wait for the legacy migration to finish."));
+    if (online) throw Error(tr("An online operation is already running."));
     const pending = pendingChannel();
-    if (pending) throw Error(pending + ' stopped without a safe continuation. Verify its state and unlock before using either online connection.');
+    if (pending) throw Error(tr('{0} stopped without a safe continuation. Verify its state and unlock before using either online connection.',pending));
     const key = channel + 'Pending';
     online = true;
     try {
@@ -163,7 +166,7 @@ function activate(context) {
   const bindingSignature = binding => binding ? JSON.stringify([binding.id,binding.revision]) : null;
   const connectionStatus=window.createStatusBarItem(vscode.StatusBarAlignment.Right,100);
   connectionStatus.command='dbw.bindConnection';
-  connectionStatus.name='SQLQuay 当前执行连接';
+  connectionStatus.name=tr("SQLQuay execution connection");
   context.subscriptions.push(connectionStatus);
   function setEditorContext() {
     const doc=window.activeTextEditor?.document;
@@ -171,58 +174,58 @@ function activate(context) {
     void commands.executeCommand('setContext','dbw.runnableEditor',enabled);
     if (!enabled) { connectionStatus.hide(); return; }
     const bound=executionBinding(doc);
-    let label='选择执行连接';
+    let label=tr("Choose execution connection");
     if (bound) {
-      try { const c=live(bound); label=c.name+' / '+c.database+' · '+channelLabel(c); }
-      catch { label='连接已变更，重新选择'; }
+      try { const c=live(bound); label=connectionName(c)+' / '+c.database+' · '+channelLabel(c); }
+      catch { label=tr("Connection changed; reselect"); }
     }
     connectionStatus.text='$(database) '+label;
-    connectionStatus.tooltip='当前文件的执行连接。点击切换；工作区默认预览连接不会自动用于执行 SQL。';
+    connectionStatus.tooltip=tr("Execution connection for this file. Click to change it; the workspace preview default does not automatically execute SQL.");
     connectionStatus.show();
   }
   context.subscriptions.push(window.onDidChangeActiveTextEditor(setEditorContext));
   async function chooseConnection({doc,schema,title,resetLabel,current}) {
     const options=all().filter(c=>(workspace.isTrusted || channelOf(c)==='demo') && (!schema || c.database===schema));
-    if (!options.length) throw Error('没有符合这个库名的预览连接，请先添加连接。');
+    if (!options.length) throw Error(tr("No preview connection matches this database. Add a connection first."));
     const items=[...options.filter(c=>c!==DEMO),...options.filter(c=>c===DEMO)].map(c=>({
-      label:c.name,description:c.database + ' · ' + channelLabel(c) +
-        (bindingSignature(c)===bindingSignature(current) ? ' · 当前选择' : ''),connection:c
+      label:connectionName(c),description:c.database + ' · ' + channelLabel(c) +
+        (bindingSignature(c)===bindingSignature(current) ? tr(" · Selected") : ''),connection:c
     }));
     if (resetLabel) items.push({label:resetLabel,reset:true});
-    const choice=await window.showQuickPick(items,{title,placeHolder:schema ?? '选择 JDBC 或 DMS 连接'});
+    const choice=await window.showQuickPick(items,{title,placeHolder:schema ?? tr("Choose a JDBC or DMS connection")});
     if (!choice || doc?.isClosed) return;
     return choice.reset ? null : live(choice.connection);
   }
-  const fileDdlTitle = '为此 SQL 文件选择表定义预览连接';
+  const fileDdlTitle = tr("Choose a DDL preview connection for this SQL file");
   const rememberDdlConnection = (doc,c) => saveDdlBinding(fileDdlKey(doc),c);
   register(workspaceDdlCommand,async ()=>{
-    if (!workspace.workspaceFolders?.length) throw Error('请先打开一个 VS Code 工作区。');
+    if (!workspace.workspaceFolders?.length) throw Error(tr("Open a VS Code workspace first."));
     const current=workspaceDdl();
-    const connection=await chooseConnection({title:'设置工作区默认表定义预览连接',current,
-      resetLabel:current ? '清除工作区默认连接' : undefined});
+    const connection=await chooseConnection({title:tr("Set Workspace Default DDL Preview Connection"),current,
+      resetLabel:current ? tr("Clear workspace default connection") : undefined});
     if (connection===undefined) return;
     await saveDdlBinding(workspaceDdlKey,connection);
     changed.fire();
-    window.setStatusBarMessage(connection ? '工作区默认预览连接：' + connection.name : '已清除工作区默认预览连接。',4000);
+    window.setStatusBarMessage(connection ? tr('Workspace default preview connection: {0}',connection.name) : tr("Workspace default preview connection cleared."),4000);
   });
   register('bindDdlConnection',async ()=>{
     const doc=window.activeTextEditor?.document;
-    if (!savedSql(doc)) throw Error('请打开一个已有的 SQL 文件。');
-    if (executionBinding(doc)) throw Error('当前文件的悬停和预览跟随执行连接，请使用“选择当前文件的执行连接”切换。');
+    if (!savedSql(doc)) throw Error(tr("Open an existing SQL file."));
+    if (executionBinding(doc)) throw Error(tr("Hover and preview use this file's execution connection. Use Choose Execution Connection for Current File to change it."));
     const override=fileDdl(doc);
     const connection=await chooseConnection({doc,title:fileDdlTitle,current:ddlBinding(doc),
-      resetLabel:override ? '清除文件单独设置（使用工作区默认）' : undefined});
+      resetLabel:override ? tr("Clear file override (use workspace default)") : undefined});
     if (connection===undefined) return;
     await rememberDdlConnection(doc,connection);
-    window.setStatusBarMessage(connection ? '表定义预览连接：' + connection.name : '已清除文件单独设置。',4000);
+    window.setStatusBarMessage(connection ? tr('DDL preview connection: {0}',connection.name) : tr("File preview override cleared."),4000);
   });
   async function bindConnection(doc) {
-    if (!savedSql(doc) && !bindings.has(doc)) throw Error('请先打开一个本地 SQL 文件或 New Query 编辑器。');
+    if (!savedSql(doc) && !bindings.has(doc)) throw Error(tr("Open a local SQL file or a New Query editor first."));
     const current=executionBinding(doc), signature=bindingSignature(current);
-    const connection=await chooseConnection({doc,title:'选择当前文件的执行连接',current,
-      resetLabel:current ? '清除执行连接（保留预览设置）' : undefined});
+    const connection=await chooseConnection({doc,title:tr("Choose Execution Connection for Current File"),current,
+      resetLabel:current ? tr("Clear execution connection (keep preview settings)") : undefined});
     if (connection===undefined) return;
-    if (doc.isClosed || bindingSignature(executionBinding(doc))!==signature) throw Error('文件连接已变更，请重新选择。');
+    if (doc.isClosed || bindingSignature(executionBinding(doc))!==signature) throw Error(tr("File connection changed. Choose again."));
     if (savedSql(doc)) await saveDdlBinding(fileSqlKey(doc),connection);
     else if (connection) bindings.set(doc,connection);
     else bindings.delete(doc);
@@ -233,9 +236,9 @@ function activate(context) {
   register('searchTables',async node=>{
     const scope=node?.connection;
     const items=all().filter(c=>!scope || c.id===scope.id).flatMap(connection=>(tables.get(connection.id)??[])
-      .map(table=>({label:table,description:connection.name+' / '+connection.database+' · '+channelLabel(connection),connection,table})));
-    if(!items.length) throw Error('请先使用 Load / Refresh Tables 加载表清单。');
-    const choice=await window.showQuickPick(items,{title:'搜索已加载的表',matchOnDescription:true});
+      .map(table=>({label:table,description:connectionName(connection)+' / '+connection.database+' · '+channelLabel(connection),connection,table})));
+    if(!items.length) throw Error(tr("Load the table list with Load / Refresh Tables first."));
+    const choice=await window.showQuickPick(items,{title:tr("Search loaded tables"),matchOnDescription:true});
     if(!choice) return;
     const connection=live(choice.connection);
     await treeView.reveal({kind:'table',label:choice.table,connection},{select:true,focus:true});
@@ -248,7 +251,7 @@ function activate(context) {
       if(channelOf(c)!=='demo' && !workspace.isTrusted) return [];
       return suggestions(part.text,offset-part.start,c.database,tables.get(c.id)??[],columns.get(c.id)??new Map()).map(v=>{
         const item=new vscode.CompletionItem(v.name,v.kind==='table' ? vscode.CompletionItemKind.Struct : vscode.CompletionItemKind.Field);
-        item.detail=v.kind==='table' ? c.name+' / '+c.database : v.type;
+        item.detail=v.kind==='table' ? connectionName(c)+' / '+c.database : v.type;
         item.insertText=v.insert;
         item.range=new vscode.Range(doc.positionAt(part.start+v.start),doc.positionAt(part.start+v.end));
         return item;
@@ -269,8 +272,8 @@ function activate(context) {
     if (ddlPending.has(key)) return ddlPending.get(key);
     live(connection);
     if (channelOf(connection)!=='demo') {
-      if (pendingChannel()) return Promise.resolve({error:'在线查询已锁定，请先核对上一条查询的状态。'});
-      if (online) return Promise.resolve({error:'另一条在线请求正在运行，结束后再悬停。'});
+      if (pendingChannel()) return Promise.resolve({error:tr("Online queries are locked. Verify the previous query state first.")});
+      if (online) return Promise.resolve({error:tr("Another online operation is running. Hover again when it finishes.")});
     }
     const task=(async ()=>{
       let preview, fields;
@@ -281,7 +284,7 @@ function activate(context) {
         fields=ddlColumns(ddl);
       } catch (error) {
         // A failed hover is not retried automatically; refreshing the connection clears it.
-        preview={error:error.message};
+        preview={error:tr(error.message)};
       }
       live(connection);
       if(fields?.length) {
@@ -320,10 +323,10 @@ function activate(context) {
       const range=new vscode.Range(doc.positionAt(ref.start),doc.positionAt(ref.end));
       const heading=new vscode.MarkdownString();
       heading.appendText(sameDatabase
-        ? connection.database + '.' + ref.table + ' · ' + connection.name + ' · ' + channelLabel(connection) +
-          (file && !executionBinding(doc) && !fileDdl(doc) ? ' · 工作区默认' : '')
+        ? connection.database + '.' + ref.table + ' · ' + connectionName(connection) + ' · ' + channelLabel(connection) +
+          (file && !executionBinding(doc) && !fileDdl(doc) ? tr(" · Workspace default") : '')
         : (ref.schema ? ref.schema + '.' : '') + ref.table +
-          (executionBinding(doc) ? ' · 请切换当前文件的执行连接' : ' · 请先选择预览连接'));
+          (executionBinding(doc) ? tr(" · Change this file's execution connection") : tr(" · Choose a preview connection first")));
       const body=new vscode.MarkdownString();
       if (sameDatabase) {
         const version=doc.version, signature=bindingSignature(bound);
@@ -339,15 +342,15 @@ function activate(context) {
         if (preview.error) body.appendText(preview.error);
         else {
           body.appendCodeblock(preview.ddl,'sql');
-          if (preview.truncated) body.appendText('表定义过长，仅显示前 24,000 个字符。');
-          return new vscode.Hover([heading,hoverLink('预览数据',previewCommand,doc,offset,bound),body],range);
+          if (preview.truncated) body.appendText(tr("The table definition is truncated to the first 24,000 characters."));
+          return new vscode.Hover([heading,hoverLink(tr("Preview data"),previewCommand,doc,offset,bound),body],range);
         }
       } else {
         if (executionBinding(doc)) {
-          body.appendText('请点击状态栏或编辑器右上的数据库图标，重新选择匹配此表的执行连接。');
+          body.appendText(tr("Use the status bar or database icon to choose an execution connection matching this table."));
           return new vscode.Hover([heading,body],range);
         }
-        return new vscode.Hover([heading,hoverLink('选择预览连接',ddlCommand,doc,offset,bound)],range);
+        return new vscode.Hover([heading,hoverLink(tr("Choose preview connection"),ddlCommand,doc,offset,bound)],range);
       }
       return new vscode.Hover([heading,body],range);
     }
@@ -356,40 +359,40 @@ function activate(context) {
     const doc=workspace.textDocuments.find(d=>d.uri.toString()===uri);
     const bound=doc && ddlBinding(doc);
     if (!bound || doc.isClosed || doc.version!==version || !Number.isInteger(offset) || bindingSignature(bound)!==signature) {
-      throw Error('文件或预览连接已变更，请重新悬停表名。');
+      throw Error(tr("File or preview connection changed. Hover the table name again."));
     }
     const connection=live(bound);
     const part=region(doc,offset);
     const ref=part && relationAt(part.text,offset-part.start,connection.database);
-    if (!ref || !ddlCache.get(ddlKey(connection,ref.table))?.ddl) throw Error('请重新悬停表名后预览数据。');
+    if (!ref || !ddlCache.get(ddlKey(connection,ref.table))?.ddl) throw Error(tr("Hover the table name again before previewing data."));
     return run(connection,connection.database + '.' + ref.table,'PREVIEW',ref.table);
   });
   register('loadTableDdl',async (uri,version,offset,signature)=>{
     const doc=workspace.textDocuments.find(d=>d.uri.toString()===uri);
     const current=()=>doc && !doc.isClosed && doc.version===version && bindingSignature(ddlBinding(doc))===signature;
-    if (!current() || !Number.isInteger(offset)) throw Error('请在 SQL 编辑器中重新悬停表名。');
+    if (!current() || !Number.isInteger(offset)) throw Error(tr("Hover the table name again in the SQL editor."));
     const bound=ddlBinding(doc), file=savedSql(doc);
     let connection;
     if (bound) try { connection=live(bound); } catch (error) { if (!file) throw error; }
-    if (!connection && !file) throw Error('请在绑定的 SQL 编辑器中重新悬停表名。');
+    if (!connection && !file) throw Error(tr("Hover the table name again in the bound SQL editor."));
     const part=region(doc,offset);
     const ref=part && relationAt(part.text,offset-part.start,file ? undefined : connection.database);
-    if (!ref) throw Error('当前光标不是可预览的表名。');
+    if (!ref) throw Error(tr("The cursor is not on a previewable table name."));
     if (file && (!connection || (ref.schema && ref.schema!==connection.database))) {
       connection=await chooseConnection({doc,schema:ref.schema,title:fileDdlTitle});
       if (!connection) return;
-      if (!current()) throw Error('文件或预览连接已变更，请重新悬停表名。');
+      if (!current()) throw Error(tr("File or preview connection changed. Hover the table name again."));
       await rememberDdlConnection(doc,connection);
     }
-    const preview=await window.withProgress({location:vscode.ProgressLocation.Notification,title:'正在加载表定义…'},
+    const preview=await window.withProgress({location:vscode.ProgressLocation.Notification,title:tr("Loading table definition…")},
       ()=>loadDdl(connection,ref.table));
     if (preview.error) throw Error(preview.error);
-    window.setStatusBarMessage('表定义已加载，再次悬停表名可查看。',4000);
+    window.setStatusBarMessage(tr("Table definition loaded. Hover the table name to view it."),4000);
   });
   function assetPaths(view) {
     const media = Uri.joinPath(context.extensionUri,'media');
     const uri = name => view.asWebviewUri(Uri.joinPath(media,name)).toString();
-    return {csp:view.cspSource,css:uri('workbench.css'),script:uri('workbench.js'),icon:uri('database.svg')};
+    return {language:vscode.env?.language,csp:view.cspSource,css:uri('workbench.css'),script:uri('workbench.js'),i18n:uri('i18n.js'),icon:uri('database.svg')};
   }
   const webOptions = {enableScripts:true,retainContextWhenHidden:true,localResourceRoots:[Uri.joinPath(context.extensionUri,'media')]};
   let formPanel;
@@ -398,7 +401,7 @@ function activate(context) {
       formPanel.dispose();
       formPanel=undefined;
     }
-    const panel = window.createWebviewPanel('dbw.connect',edit ? 'Edit ' + edit.name : 'Connect to server',vscode.ViewColumn.One,webOptions);
+    const panel = window.createWebviewPanel('dbw.connect',edit ? tr('Edit {0}',edit.name) : tr("Connect to server"),vscode.ViewColumn.One,webOptions);
     formPanel=panel;
     let busy=false;
     const receive = panel.webview.onDidReceiveMessage(async message => {
@@ -407,12 +410,12 @@ function activate(context) {
       if (message.type==='loadDmsProfiles') {
         if(!workspace.isTrusted) return;
         try { await panel.webview.postMessage({type:'dmsProfiles',profiles:await listDmsProfiles()}); }
-        catch(error) { await panel.webview.postMessage({type:'dmsProfiles',profiles:[],message:error.message}); }
+        catch(error) { await panel.webview.postMessage({type:'dmsProfiles',profiles:[],message:tr(error.message)}); }
         return;
       }
       if (message.type==='configureDms') {
         if(!workspace.isTrusted) return;
-        const terminal=window.createTerminal({name:'SQLQuay · Aliyun CLI setup'});
+        const terminal=window.createTerminal({name:tr("SQLQuay · Aliyun CLI setup")});
         terminal.show();terminal.sendText('aliyun configure --profile my-dms',false);
         return;
       }
@@ -422,11 +425,11 @@ function activate(context) {
       let disposed = false;
       const lifecycle = panel.onDidDispose(()=>{disposed=true;});
       try {
-        if (!workspace.isTrusted) throw Error('Online connection configuration is disabled in untrusted workspaces.');
+        if (!workspace.isTrusted) throw Error(tr("Online connection configuration is disabled in untrusted workspaces."));
         if (edit) live(edit);
         const channel = message.values.channel;
         if (!['jdbc','dms'].includes(channel) || (edit && channel !== channelOf(edit))) {
-          throw Error('To change the connection method, create a new connection.');
+          throw Error(tr("To change the connection method, create a new connection."));
         }
         const data = channel === 'dms' ? dmsConfig(message.values) : connectionConfig(message.values);
         const connection = {...data,channel,id:edit?.id ?? randomUUID(),revision:edit ? edit.revision : randomUUID()};
@@ -434,17 +437,17 @@ function activate(context) {
         if (channel === 'jdbc') {
           const user = typeof message.values.user === 'string' ? message.values.user.trim() : '';
           const password = typeof message.values.password === 'string' ? message.values.password : '';
-          if (user.length > 256 || password.length > 1024 || (password && !user)) throw Error('Enter a valid read-only username and password.');
-          if (!edit && !user) throw Error('Enter a read-only username.');
+          if (user.length > 256 || password.length > 1024 || (password && !user)) throw Error(tr("Enter a valid read-only username and password."));
+          if (!edit && !user) throw Error(tr("Enter a read-only username."));
           const changedTarget = edit && ['host','port','database','engine'].some(key=>connection[key]!==edit[key]);
-          if (changedTarget && !user) throw Error('Re-enter credentials when changing the target.');
+          if (changedTarget && !user) throw Error(tr("Re-enter credentials when changing the target."));
           if (connection.sslMode === 'DISABLED' && (edit?.sslMode !== 'DISABLED' || changedTarget)) {
-            const action = 'Use Unencrypted JDBC';
+            const action = tr("Use Unencrypted JDBC");
             const answer = await window.showWarningMessage(
-              'This JDBC connection will send traffic without TLS. The server identity is not verified, and SQL and results can be intercepted or modified. Prefer DMS on public networks.',
+              tr("This JDBC connection will send traffic without TLS. The server identity is not verified, and SQL and results can be intercepted or modified. Prefer DMS on public networks."),
               {modal:true},action
             );
-            if (answer !== action || disposed) throw Error('Unencrypted JDBC was not confirmed. Choose verified TLS or use DMS.');
+            if (answer !== action || disposed) throw Error(tr("Unencrypted JDBC was not confirmed. Choose verified TLS or use DMS."));
           }
           credentials = user ? {user,password} : await credentialsFor(edit);
           newUser = !!user;
@@ -454,14 +457,14 @@ function activate(context) {
         const catalog = message.type === 'connect' ? await query(connection,'SHOW TABLES',10000,credentials) : undefined;
         if (disposed) return;
         const existing = context.globalState.get('connections',[]);
-        if (catalog?.truncated) throw Error('The table list exceeded the metadata display limit.');
+        if (catalog?.truncated) throw Error(tr("The table list exceeded the metadata display limit."));
         if (newUser) await context.secrets.store(secretKey(connection.id),JSON.stringify(credentials));
         await context.globalState.update('connections',edit ? existing.map(c=>c.id===edit.id ? connection:c) : [...existing,connection]);
         if (catalog) tables.set(connection.id,tableNames(catalog)); else if (changedConnection) tables.delete(connection.id);
         if (changedConnection) { columns.delete(connection.id); clearDdl(connection); }
         activeId = connection.id; changed.fire(); setEditorContext(); panel.dispose();
       } catch (error) {
-        if (!disposed) await panel.webview.postMessage({type:'error',message:error.message});
+        if (!disposed) await panel.webview.postMessage({type:'error',message:tr(error.message)});
       } finally { busy=false; lifecycle.dispose(); }
     });
     panel.onDidDispose(()=>{receive.dispose();if(formPanel===panel) formPanel=undefined;});
@@ -473,16 +476,16 @@ function activate(context) {
   register('edit',node=>{const connection=getTarget(node); if(connection.engine!=='demo') openForm(connection);});
   register('remove',async node=>{
     const connection=getTarget(node); if(connection.engine==='demo') return;
-    const confirmed=await window.showWarningMessage('Remove ' + connection.name + '?',{modal:true},'Remove');
-    if (confirmed!=='Remove') return;
+    const confirmed=await window.showWarningMessage(tr('Remove {0}?',connection.name),{modal:true},tr("Remove"));
+    if (confirmed!==tr("Remove")) return;
     await context.globalState.update('connections',context.globalState.get('connections',[]).filter(c=>c.id!==connection.id));
     if (channelOf(connection) === 'jdbc') await context.secrets.delete(secretKey(connection.id));
     tables.delete(connection.id); columns.delete(connection.id); clearDdl(connection); if(activeId===connection.id) activeId='demo'; changed.fire(); setEditorContext();
   });
   register('refresh',async node=>{
     const connection=getTarget(node);
-    const result=await window.withProgress({location:vscode.ProgressLocation.Notification,title:'Loading tables · ' + connection.name},()=>query(connection,'SHOW TABLES',10000));
-    if(result.truncated) throw Error('The table list exceeded the metadata display limit.');
+    const result=await window.withProgress({location:vscode.ProgressLocation.Notification,title:tr('Loading tables · {0}',connectionName(connection))},()=>query(connection,'SHOW TABLES',10000));
+    if(result.truncated) throw Error(tr("The table list exceeded the metadata display limit."));
     live(connection); tables.set(connection.id,tableNames(result)); if(connection.id!=='demo') columns.delete(connection.id); clearDdl(connection); changed.fire();
   });
   register('newQuery',async node=>{
@@ -495,20 +498,20 @@ function activate(context) {
   });
   register('run',async ()=>{
     const editor=window.activeTextEditor;
-    if(!editor) throw Error('请先打开编辑器。');
+    if(!editor) throw Error(tr("Open an editor first."));
     const doc=editor.document, version=doc.version;
     const offset=doc.offsetAt(editor.selection.active), selected=doc.getText(editor.selection);
     const part=region(doc,offset);
-    if(!selected.trim() && !part) throw Error('请选中纯 SQL，或将光标放在受支持的 SQL 代码块内。');
+    if(!selected.trim() && !part) throw Error(tr("Select plain SQL or put the cursor inside a supported SQL block."));
     let sql=selected.trim() ? selected : pickSql(part.text,offset-part.start,'');
     if(doc.languageId!=='sql') sql=selectedSql(sql);
     const bound=executionBinding(doc) ?? await bindConnection(doc);
     if (!bound) return;
-    if (doc.isClosed || doc.version!==version || window.activeTextEditor?.document!==doc) throw Error('SQL 文件已变更，请重新执行。');
+    if (doc.isClosed || doc.version!==version || window.activeTextEditor?.document!==doc) throw Error(tr("SQL file changed. Run it again."));
     return run(bound,sql);
   });
   register('describe',async node=>{
-    if(node?.kind!=='table' || !tables.get(node.connection.id)?.includes(node.label)) throw Error('Choose a table from the Database tree.');
+    if(node?.kind!=='table' || !tables.get(node.connection.id)?.includes(node.label)) throw Error(tr("Choose a table from the Database tree."));
     const result=await run(node.connection,'DESCRIBE ' + quoteTable(node.label),'PROPERTIES');
     if (!result || result.truncated) return;
     live(node.connection);
@@ -519,20 +522,20 @@ function activate(context) {
   register('unlock',async ()=>{
     const pending = pendingChannel();
     if (online || !pending) return;
-    const action = pending === 'DMS' ? 'the DMS query has ended and AI Mode is clean' : 'the JDBC query has ended on the server';
-    if (await window.showWarningMessage('Confirm ' + action + ' before unlocking either online connection.',{modal:true},'Confirmed')==='Confirmed') {
+    const action = pending === 'DMS' ? tr("the DMS query has ended and AI Mode is clean") : tr("the JDBC query has ended on the server");
+    if (await window.showWarningMessage(tr('Confirm {0} before unlocking either online connection.',action),{modal:true},tr("Confirmed"))===tr("Confirmed")) {
       await context.globalState.update(pending.toLowerCase() + 'Pending',false);
     }
   });
   function publish(entry) {
     if(entry.panel) {
-      entry.panel.title=(entry.pinned?'📌 ':'')+'Query Result #'+entry.view.id+' · '+entry.view.mode;
+      entry.panel.title=(entry.pinned?'📌 ':'')+tr('Query Result #{0} · {1}',entry.view.id,modeLabel(entry.view.mode));
       void entry.panel.webview.postMessage({...entry.view,pinned:!!entry.pinned});
     }
   }
   function showResult(entry) {
     if(entry.panel) {entry.panel.reveal(undefined,true);return;}
-    const panel=window.createWebviewPanel('dbw.result','Query Result #'+entry.view.id+' · '+entry.view.mode,
+    const panel=window.createWebviewPanel('dbw.result',tr('Query Result #{0} · {1}',entry.view.id,modeLabel(entry.view.mode)),
       {viewColumn:vscode.ViewColumn.Beside,preserveFocus:true},webOptions);
     entry.panel=panel;
     const receive=panel.webview.onDidReceiveMessage(message=>{
@@ -542,7 +545,7 @@ function activate(context) {
       if(message.type==='pin') {entry.pinned=!entry.pinned;publish(entry);return;}
       if(message.type==='history') {void commands.executeCommand('dbw.history');return;}
       if(message.type==='run' && entry.view.mode!=='PREVIEW' && typeof message.sql==='string' && !running) {
-        void run(entry.target,message.sql).catch(error=>void window.showErrorMessage(error.message));
+        void run(entry.target,message.sql).catch(error=>void window.showErrorMessage(tr(error.message)));
       }
       if(message.type==='copy' && Number.isInteger(message.row) && entry.view.result?.rows[message.row]) {
         void vscode.env.clipboard.writeText(entry.view.result.rows[message.row].map(v=>v===null?'NULL':v.replace(/[\t\r\n]+/g,' ')).join('\t'));
@@ -554,22 +557,22 @@ function activate(context) {
   register('history',async ()=>{
     const items=[...sessions.entries].reverse().map(entry=>({
       label:(entry.pinned?'$(pinned) ':'')+'#'+entry.view.id+' '+entry.view.sql.replace(/\s+/g,' ').slice(0,100),
-      description:entry.view.target,detail:entry.view.state+' · '+(entry.view.elapsed??0)+' ms',entry}));
-    if(!items.length) {window.setStatusBarMessage('本次会话暂无查询历史。',3000);return;}
-    const choice=await window.showQuickPick(items,{title:'会话查询历史（仅内存，选择只恢复结果，不执行 SQL）',matchOnDescription:true});
+      description:entry.view.target,detail:tr({running:'Running',done:'Completed',error:'Failed'}[entry.view.state])+' · '+(entry.view.elapsed??0)+' ms',entry}));
+    if(!items.length) {window.setStatusBarMessage(tr("No query history in this session."),3000);return;}
+    const choice=await window.showQuickPick(items,{title:tr("Session query history (memory only; selecting restores results without running SQL)"),matchOnDescription:true});
     if(choice && sessions.entries.includes(choice.entry)) showResult(choice.entry);
   });
   register('clearHistory',()=>{
     sessions.clearClosed();
-    window.setStatusBarMessage('已清除关闭且未固定的会话历史；打开或固定的结果仍保留。',4000);
+    window.setStatusBarMessage(tr("Closed, unpinned history cleared; open or pinned results are kept."),4000);
   });
   async function run(target,sql,mode='DATA',table) {
-    if(running) throw Error('Wait for the active query to finish.');
+    if(running) throw Error(tr("Wait for the active query to finish."));
     const connection=live(target);
     if(table===undefined) readonly(sql);
     const start=performance.now(), id=++serial;
     const entry=sessions.add({target:connection,view:{id,state:'running',sql,mode,
-      target:connection.name+' / '+connection.database+(channelOf(connection)==='demo'?'':' · '+channelLabel(connection))}});
+      target:connectionName(connection)+' / '+connection.database+(channelOf(connection)==='demo'?'':' · '+channelLabel(connection))}});
     running=true;
     try {
       showResult(entry);publish(entry);
@@ -577,16 +580,16 @@ function activate(context) {
       entry.view={...entry.view,state:'done',elapsed:Math.round(performance.now()-start),result,timings:result.timings};
       publish(entry);return result;
     } catch(error) {
-      entry.view={...entry.view,state:'error',elapsed:Math.round(performance.now()-start),error:error.message,timings:error.timings};
+      entry.view={...entry.view,state:'error',elapsed:Math.round(performance.now()-start),error:tr(error.message),timings:error.timings};
       publish(entry);
     } finally {running=false;}
   }
   const migration=importer(context,vscode,()=>{changed.fire();setEditorContext();},busy=>{importing=busy;});
   register('importLegacy',async()=>{
-    if(online || running) throw Error('Wait for the active query to finish.');
+    if(online || running) throw Error(tr("Wait for the active query to finish."));
     const result=await migration.start();
-    if(result?.alreadyImported) window.setStatusBarMessage('当前工作区已导入旧版配置。',4000);
-    else if(result && !result.cancelled) window.setStatusBarMessage(`已导入 ${result.connections} 个连接、${result.credentials} 套 JDBC 凭据、${result.bindings} 个当前工作区绑定；旧数据保留。`,6000);
+    if(result?.alreadyImported) window.setStatusBarMessage(tr("Legacy settings already imported for this workspace."),4000);
+    else if(result && !result.cancelled) window.setStatusBarMessage(tr('Imported {0} connections, {1} JDBC credential sets and {2} workspace bindings; legacy data is retained.',result.connections,result.credentials,result.bindings),6000);
     return result;
   });
   setEditorContext();

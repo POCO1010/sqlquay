@@ -46,7 +46,7 @@ test('JDBC validates target and sends credentials over stdin, keeps SQL NULL and
   await assert.rejects(makeJdbc(settings,dir,async()=>({error:'unknown'}))(target,credentials,'SELECT 1'),UnknownState);
 });
 test('webviews load local assets and define the action order',()=>{
-  const assets={css:'test.css',script:'test.js',icon:'database.svg',csp:"'self'"};
+  const assets={css:'test.css',script:'test.js',i18n:'i18n.js',icon:'database.svg',csp:"'self'"};
   for(const template of [connectHtml,resultHtml]) {
     const html=template(assets);
     assert.match(html,/connect-src 'none'/);

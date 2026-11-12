@@ -76,7 +76,7 @@ function regionAt(doc,offset) {
   }
 }
 function selectedSql(text) {
-  if(/\$\{|\{\{|\{[a-zA-Z_]\w*(?:[.:][^{}]*)?\}/.test(text)) throw Error('请先把模板变量替换为明确值；Workbench 不执行宿主代码或求值表达式。');
+  if(/\$\{|\{\{|\{[a-zA-Z_]\w*(?:[.:][^{}]*)?\}/.test(text)) throw Error("Replace template variables with explicit values first; SQLQuay does not execute host code or evaluate expressions.");
   return text;
 }
 module.exports={languages,regionAt,selectedSql};

@@ -1,7 +1,9 @@
 const vscode = require('vscode');
 const assert = require('node:assert/strict');
 const fs = require('node:fs');
-const tabs = label => vscode.window.tabGroups.all.flatMap(group=>group.tabs).filter(tab=>label==='Query Result' ? tab.label.startsWith('Query Result #') : tab.label===label);
+const {translator}=require('../media/i18n.js');
+const tr=translator(vscode.env.language),resultPrefix=tr('Query Result #{0} · {1}').split('{0}')[0];
+const tabs = label => vscode.window.tabGroups.all.flatMap(group=>group.tabs).filter(tab=>label==='Query Result' ? tab.label.startsWith(resultPrefix) : tab.label===label);
 async function waitForTab(label) {
   if (tabs(label).length) return;
   await new Promise((resolve,reject)=>{
@@ -50,7 +52,7 @@ exports.run = async function() {
   assert.ok(extension.isActive,'Opening SQL activates Workbench');
   mark('before initial hover');
   const results=await vscode.commands.executeCommand('vscode.executeHoverProvider',file,position);
-  const offer=results.flatMap(h=>h.contents).find(item=>item.value?.includes('[选择预览连接]'));
+  const offer=results.flatMap(h=>h.contents).find(item=>item.value?.includes('['+tr('Choose preview connection')+']'));
   assert.ok(offer,'Existing SQL gets a Workbench hover without opening a Workbench view');
   mark('initial hover returned');
   const fileArgs=JSON.parse(decodeURIComponent(offer.value.match(/command:dbw\.loadTableDdl\?([^)]*)/)[1]));
@@ -68,10 +70,10 @@ exports.run = async function() {
   await vscode.workspace.openTextDocument(nextFile);
   const inherited=await vscode.commands.executeCommand('vscode.executeHoverProvider',nextFile,position);
   const inheritedText=inherited.flatMap(h=>h.contents).map(item=>item.value).join('\n');
-  assert.match(inheritedText,/工作区默认/);
+  assert.ok(inheritedText.includes(tr(' · Workspace default')));
   assert.match(inheritedText,/CREATE TABLE products/);
-  assert.doesNotMatch(inheritedText,/加载表定义|选择预览连接/);
-  const previewLink=inheritedText.match(/\[预览数据\]\(command:dbw\.previewTable\?([^)]*)\)/);
+  assert.doesNotMatch(inheritedText,/command:dbw\.loadTableDdl/);
+  const previewLink=inheritedText.match(/command:dbw\.previewTable\?([^)]*)\)/);
   assert.ok(previewLink);
   const sample=await vscode.commands.executeCommand('dbw.previewTable',...JSON.parse(decodeURIComponent(previewLink[1])));
   assert.equal(sample.rows.length,6);
@@ -87,7 +89,7 @@ exports.run = async function() {
   await vscode.window.showTextDocument(reopened);
   assert.equal((await vscode.commands.executeCommand('dbw.run')).rows.length,6);
   await vscode.commands.executeCommand('dbw.connect');
-  await waitForTab('Connect to server');
+  await waitForTab(tr('Connect to server'));
   const doc=await vscode.commands.executeCommand('dbw.newQuery');
   assert.equal(doc.languageId,'sql');
   assert.equal(vscode.window.activeTextEditor.document,doc);
@@ -108,7 +110,7 @@ exports.run = async function() {
   editor.selection=new vscode.Selection(3,0,3,18);
   const selected=await vscode.commands.executeCommand('dbw.run');
   assert.deepEqual(selected.rows,[['1']]);
-  const panels=vscode.window.tabGroups.all.flatMap(group=>group.tabs).filter(tab=>tab.label.startsWith('Query Result #'));
+  const panels=vscode.window.tabGroups.all.flatMap(group=>group.tabs).filter(tab=>tab.label.startsWith(resultPrefix));
   assert.ok(panels.length>=4);
   const metadata=await vscode.commands.executeCommand('dbw.describe',{kind:'table',label:'products',connection:require('../src/query.cjs').DEMO});
   assert.deepEqual(metadata.rows.map(row=>row[0]),['id','name','category','price']);

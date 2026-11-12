@@ -4,6 +4,10 @@
 
 ![SQLQuay 查询结果与分阶段耗时](docs/previews/result.png)
 
+## 界面语言
+
+自动跟随 VS Code 的显示语言：中文界面使用简体中文，英文界面使用英文，其他语言暂用英文。无需单独配置；更改 VS Code 显示语言并重载窗口后生效。连接表单、设置说明、命令菜单、DDL 悬停、结果页和提示同步切换，已有连接名称、SQL 和查询数据保持原样。下文用中文说明，并保留部分英文控件名便于对照。
+
 ## 当前发行范围
 
 离线 Demo 可直接使用。在线连接当前支持 macOS / Linux，随扩展附带 MIT 许可的只读策略，无需下载私人脚本。JDBC 需要 Java 8+、Python 3.10+ 和可信 JDBC 驱动；DMS 需要 Python 3.10+、已配置的阿里云 CLI 及现有 DMS 插件。Windows 当前可用离线 Demo，在线通道暂未支持。
@@ -14,7 +18,7 @@
 
 ## 先用离线 Demo 跑通
 
-1. 在 VS Code 的扩展视图选择 **Install from VSIX…**，打开 `artifacts/sqlquay-0.5.1.vsix`。
+1. 在 VS Code 的扩展视图选择 **Install from VSIX…**，打开 `artifacts/sqlquay-0.5.2.vsix`。
 2. 打开活动栏 **SQLQuay** → **Local Demo**，点击右侧 **New Query**。
 3. 按 `Cmd/Ctrl+Enter`，或点击 SQL 编辑器右上的 ▶。每次运行在旁边打开独立的 **Query Result #编号**，不会覆盖原结果。结果页改 SQL 后重新运行也会新开结果。
 4. 对象树的 **sandbox → Tables → products** 可查看字段。Demo 是进程内固定数据，只识别 `SELECT 1 AS probe` 及从 `products` 读取显式列的简单查询（可加 `WHERE id = …` 和 `LIMIT`）；不联网、不访问真实数据库。

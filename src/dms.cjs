@@ -117,7 +117,7 @@ function makeDms(settings, transport = call) {
     if (stop || response.stderrOverflow) throw fail(new DmsStopped(locked[stop?.status] ?? 'DMS did not return a complete status.'));
     const failure = reports.find(r=>Object.hasOwn(known,r.status));
     if (failure) {
-      if (table !== undefined && failure.status==='needs_split') throw fail(Error('无法确认全表扫描量，或估算超出扫描上限，未读取数据。'));
+      if (table !== undefined && failure.status==='needs_split') throw fail(Error("Cannot confirm the full-table scan size, or its estimate exceeds the scan limit. No data was read."));
       const targetMiss = failure.status==='blocked' && typeof failure.error==='string' && failure.error.startsWith('Database metadata did not resolve');
       throw fail(Error(targetMiss ? 'DMS target not found. Verify the keyword, exact schema and Database ID for the product environment.' : known[failure.status]));
     }

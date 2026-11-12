@@ -1,11 +1,12 @@
 'use strict';
 (() => {
   const vscode = acquireVsCodeApi();
+  const tr=window.SQLQuayI18n.translator(document.documentElement.lang);
   const $ = id => document.getElementById(id);
   if (document.body.dataset.view === 'connect') {
     const form = $('connection'), feedback = $('feedback');
     let engine = 'mysql', editing = false, profiles = [];
-    const loadProfiles=()=>{ $('dms-auth-status').textContent='Reading local CLI profiles…'; vscode.postMessage({type:'loadDmsProfiles'}); };
+    const loadProfiles=()=>{ $('dms-auth-status').textContent=tr("Reading local CLI profiles…"); vscode.postMessage({type:'loadDmsProfiles'}); };
     $('dms-profiles').onclick=loadProfiles;
     $('dms-auth').onclick=()=>vscode.postMessage({type:'configureDms'});
     const method = () => form.elements.channel.value;
@@ -24,7 +25,7 @@
       if(e.target.name==='profile') {
         const selected=profiles.find(p=>p.name===form.elements.profile.value);
         form.elements.region.value=selected?.region ?? '';
-        $('dms-auth-status').textContent=selected?.valid ? 'Authentication uses the selected local CLI profile.' : 'Configure or refresh this profile in your terminal, then refresh the list.';
+        $('dms-auth-status').textContent=selected?.valid ? tr("Authentication uses the selected local CLI profile.") : tr("Configure or refresh this profile in your terminal, then refresh the list.");
       }
       if (e.target.name === 'sslMode') working(false);
       if (e.target.name !== 'engine') return;
@@ -40,7 +41,7 @@
         delete values.schema;
       }
       const type = e.submitter?.value === 'save' ? 'save' : 'connect';
-      feedback.textContent = type === 'connect' ? 'Checking connection…' : 'Saving…';
+      feedback.textContent = type === 'connect' ? tr("Checking connection…") : tr("Saving…");
       working(true);
       vscode.postMessage({type,values});
       form.elements.password.value = '';
@@ -49,14 +50,14 @@
     window.addEventListener('message', ({data:m}) => {
       if (m?.type === 'configure' && m.connection) {
         const {channel, name, group, database, engine:kind, host, port, keyword, databaseId, sslMode, profile, region} = m.connection;
-        $('heading').textContent = 'Edit connection';
+        $('heading').textContent = tr("Edit connection");
         editing = true;
         form.elements.channel.value = channel;
         const values = channel === 'dms' ? {name,group,schema:database,keyword,databaseId,region:region??'cn-hangzhou'} : {name,group,database,engine:kind,host,port,sslMode:sslMode ?? 'VERIFY_IDENTITY'};
         for (const [key,value] of Object.entries(values)) form.elements[key].value = value ?? '';
         if (channel === 'jdbc') {
           form.elements.user.required = false;
-          form.elements.user.placeholder = 'Leave blank to keep credentials';
+          form.elements.user.placeholder = tr("Leave blank to keep credentials");
           engine = kind;
         }
         if(channel==='dms') {
@@ -67,10 +68,10 @@
       if(m?.type==='dmsProfiles') {
         const selected=form.elements.profile.value;
         profiles=Array.isArray(m.profiles) ? m.profiles : [];
-        form.elements.profile.replaceChildren(new Option('Choose a configured profile',''),...profiles.map(p=>new Option(p.name+' · '+p.region+(p.valid?'':' · authentication needed'),p.name)));
-        if(selected && !profiles.some(p=>p.name===selected)) form.elements.profile.add(new Option(selected+' · not found locally',selected));
+        form.elements.profile.replaceChildren(new Option(tr("Choose a configured profile"),''),...profiles.map(p=>new Option(p.name+' · '+p.region+(p.valid?'':tr(" · authentication needed")),p.name)));
+        if(selected && !profiles.some(p=>p.name===selected)) form.elements.profile.add(new Option(selected+tr(" · not found locally"),selected));
         form.elements.profile.value=selected;
-        $('dms-auth-status').textContent=m.message || (profiles.length ? 'Select a local CLI profile. Region can be adjusted for your DMS service.' : 'No named profile found. Configure CLI authentication in the terminal, then refresh.');
+        $('dms-auth-status').textContent=m.message || (profiles.length ? tr("Select a local CLI profile. Region can be adjusted for your DMS service.") : tr("No named profile found. Configure CLI authentication in the terminal, then refresh."));
       }
       if (m?.type === 'error') { feedback.textContent = m.message; working(false); }
     });
@@ -110,15 +111,15 @@
       if (sort) visible.sort((a,b)=>sort.sign * compare(a.row[sort.index],b.row[sort.index],numericColumns[sort.index]) || a.index - b.index);
       const pageCount = Math.max(1,Math.ceil(visible.length/perPage)); page = Math.min(page,pageCount - 1);
       $('page').textContent = `${page + 1} / ${pageCount}`;
-      $('total').textContent = (needle ? `匹配 ${visible.length} / ` : '') + `已加载 ${data.length} 行` +
-        (preview ? ' · 预览上限 100 行' : '') + (truncated ? ' · 已截断' : '');
+      $('total').textContent = (needle ? tr('Matched {0} / ',visible.length) : '') + tr('Loaded {0} rows',data.length) +
+        (preview ? tr(" · Preview limit: 100 rows") : '') + (truncated ? tr(" · Truncated") : '');
       $('prev').disabled = page === 0; $('next').disabled = page >= pageCount-1;
       $('copy').disabled = selected === null || !visible.some(({index})=>index === selected);
       const header = document.createElement('tr'); header.append(cell('th','#','number'));
       for (const [index,column] of cols.entries()) {
-        const th = document.createElement('th'), label = cell('button',column.name || '(unnamed)');
+        const th = document.createElement('th'), label = cell('button',column.name || tr("(unnamed)"));
         th.setAttribute('scope','col');
-        label.setAttribute('aria-label',column.name || '(unnamed)');
+        label.setAttribute('aria-label',column.name || tr("(unnamed)"));
         if (sort?.index === index) { th.setAttribute('aria-sort',sort.sign > 0 ? 'ascending':'descending'); label.append(sort.sign > 0 ? ' ↑':' ↓'); }
         if (column.type) label.title = column.type;
         label.onclick = () => {
@@ -155,14 +156,14 @@
       if (m.id !== runId) { selected=null;sort=null;page=0;filter.value='';statement.value=m.sql; }
       runId = m.id;
       $('target').textContent = m.target;
-      $('pin').textContent=m.pinned ? '取消固定' : '固定结果';
+      $('pin').textContent=m.pinned ? tr("Unpin result") : tr("Pin result");
       $('pin').setAttribute('aria-pressed',String(!!m.pinned));
       preview = m.mode==='PREVIEW';
-      $('mode').textContent = preview ? '预览数据' : m.mode ?? 'DATA';
+      $('mode').textContent = ({PREVIEW:tr('Preview data'),DATA:tr('Data'),PROPERTIES:tr('Properties')}[m.mode] ?? m.mode ?? tr('Data'));
       $('run').hidden = preview;
       $('run').disabled = preview || m.state==='running';
       statement.readOnly = preview;
-      statement.setAttribute('aria-label',preview ? '预览表' : 'SQL');
+      statement.setAttribute('aria-label',preview ? tr("Preview table") : 'SQL');
       cols = m.result?.columns ?? []; data = m.result?.rows ?? []; truncated = !!m.result?.truncated;
       numericColumns=cols.map((column,index)=>{
         if (column.type) return /^(?:tinyint|smallint|mediumint|int|integer|bigint|largeint|number|numeric|dec|decimal\w*|float|double|real)\b/i.test(column.type);
@@ -172,8 +173,8 @@
       $('timing').textContent = m.elapsed === undefined ? '' : `${m.elapsed} ms`;
       const t=m.timings, phases=$('phases');
       phases.hidden=!t || !['connect','preflight','execute'].every(k=>Number.isFinite(t[k]) && t[k]>=0);
-      phases.textContent=phases.hidden ? '' : `连接 ${Math.round(t.connect)} ms · 预检 ${Math.round(t.preflight)} ms · 执行 ${Math.round(t.execute)} ms · 其他 ${Math.max(0,Math.round((m.elapsed??0)-t.connect-t.preflight-t.execute))} ms`;
-      message.textContent = m.state==='running' ? 'Running query…' : m.error ?? (m.result?.truncated ? 'Showing the first rows returned within the display limit.' : data.length===0 ? 'No rows returned.' : '');
+      phases.textContent=phases.hidden ? '' : tr('Connection {0} ms · Preflight {1} ms · Execution {2} ms · Other {3} ms',Math.round(t.connect),Math.round(t.preflight),Math.round(t.execute),Math.max(0,Math.round((m.elapsed??0)-t.connect-t.preflight-t.execute)));
+      message.textContent = m.state==='running' ? tr("Running query…") : m.error ?? (m.result?.truncated ? tr("Showing the first rows returned within the display limit.") : data.length===0 ? tr("No rows returned.") : '');
       message.classList.toggle('error',m.state==='error');
       message.hidden = !message.textContent;
       draw();

@@ -12,15 +12,17 @@ class Element {
   get firstElementChild(){return this.children.find(c=>c instanceof Element);}
   focus(){}
 }
-module.exports=function createResult(script=path.join(__dirname,'../../media/workbench.js')) {
+module.exports=function createResult(script=path.join(__dirname,'../../media/workbench.js'),language='zh-cn') {
   const ids=new Map(),head=new Element(),body=new Element(),events={},sent=[];
-  const document={body:{dataset:{view:'result'}},
+  const document={documentElement:{lang:language},body:{dataset:{view:'result'}},
     getElementById(id){if(!ids.has(id)) ids.set(id,new Element());return ids.get(id);},
     querySelector:s=>s==='thead'?head:body,createElement:()=>new Element()};
   const get=id=>document.getElementById(id);
   get('size').value='100';
-  vm.runInNewContext(fs.readFileSync(script,'utf8'),{document,window:{addEventListener:(name,fn)=>events[name]=fn},
+  const context=vm.createContext({document,window:{addEventListener:(name,fn)=>events[name]=fn},
     acquireVsCodeApi:()=>({postMessage:m=>sent.push(m)}),Intl});
+  vm.runInContext(fs.readFileSync(path.join(__dirname,'../../media/i18n.js'),'utf8'),context);
+  vm.runInContext(fs.readFileSync(script,'utf8'),context);
   let id=0;
   return {get,sent,
     receive(data){events.message({data});},

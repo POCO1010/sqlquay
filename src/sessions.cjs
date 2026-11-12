@@ -4,7 +4,7 @@ class Sessions {
   add(entry) {
     if(this.entries.length>=this.limit) {
       const index=this.entries.findIndex(e=>!e.panel && !e.pinned && e.view.state!=='running');
-      if(index<0) throw Error('已保留 20 份打开或固定的结果。请关闭未固定结果，或清除已关闭的会话历史后再运行。');
+      if(index<0) throw Error("20 open or pinned results are retained. Close an unpinned result or clear closed session history before running another query.");
       this.entries.splice(index,1);
     }
     this.entries.push(entry);return entry;

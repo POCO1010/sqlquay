@@ -1,7 +1,10 @@
 'use strict';
 const {test} = require('node:test'), assert=require('node:assert/strict'), Module=require('node:module');
 const {DmsStopped}=require('../src/dms.cjs');
-test('new DMS form, existing JDBC connection, shared result panel and cross-channel stop',async()=>{
+const {translator}=require('../media/i18n.js');
+for(const language of ['zh-cn','en']) test('connection routing, safety gates, hover and session results · '+language,async()=>{
+  const tr=translator(language);
+  const includes=(value,key)=>assert.ok(value.includes(tr(key)),value);
   const jdbc={id:'legacy',revision:'v1',name:'Existing JDBC',group:'',engine:'mysql',host:'fixture.invalid',port:3306,database:'sandbox'};
   const state=new Map([['connections',[jdbc]]]), calls=[], panels=[], commands=new Map(), errors=[];
   let tree, hoverProvider, completionProvider, stopped=false, secretReads=0, allowPlaintext=false, blocker;
@@ -27,10 +30,15 @@ test('new DMS form, existing JDBC connection, shared result panel and cross-chan
     showErrorMessage:e=>errors.push(e),
     showQuickPick:async items=>{pickItems=items;duringPick?.();return items.find(x=>pickHistoryId ? x.entry?.view.id===pickHistoryId : pickedId==='reset' ? x.reset : x.connection?.id===pickedId);},
     withProgress:(_,fn)=>fn(),setStatusBarMessage:()=>{},
-    showWarningMessage:async(_message, _options, action)=>action==='Use Unencrypted JDBC' && !allowPlaintext ? undefined : action,
+    showWarningMessage:async(message, _options, action)=>{
+      if(action===tr('Use Unencrypted JDBC')) {
+        assert.equal(message,tr("This JDBC connection will send traffic without TLS. The server identity is not verified, and SQL and results can be intercepted or modified. Prefer DMS on public networks."));return allowPlaintext ? action : undefined;
+      }
+      return action;
+    },
     showTextDocument:async document=>{window.activeTextEditor={document,selection:{active:0}};}
   };
-  const vscode={window,env:{clipboard:{writeText:async value=>copied.push(value)}},workspace:{isTrusted:true,workspaceFolders:[{}],getWorkspaceFolder:uri=>uri.toString().startsWith('file:///workspace/') ? {} : undefined,getConfiguration:()=>({get:()=>''}),textDocuments:documents,openTextDocument:async ({content,language})=>{
+  const vscode={window,env:{language,clipboard:{writeText:async value=>copied.push(value)}},workspace:{isTrusted:true,workspaceFolders:[{}],getWorkspaceFolder:uri=>uri.toString().startsWith('file:///workspace/') ? {} : undefined,getConfiguration:()=>({get:()=>''}),textDocuments:documents,openTextDocument:async ({content,language})=>{
     const doc={languageId:language,uri:'untitled:'+documents.length,version:1,text:content,offsetAt:n=>n,positionAt:n=>n,getText(selection){return selection?'':this.text;}};
     documents.push(doc);return doc;
   }},commands:{executeCommand:async()=>{},registerCommand:(id,fn)=>{commands.set(id,fn);return dispose();}},
@@ -65,6 +73,7 @@ test('new DMS form, existing JDBC connection, shared result panel and cross-chan
       }
       return load.apply(this,arguments);
     };
+    delete require.cache[require.resolve('../src/extension.cjs')];
     ({activate}=require('../src/extension.cjs'));
   } finally { Module._load=load; }
   activate({extensionUri:'fixture',extensionPath:'fixture',subscriptions:[],
@@ -79,6 +88,9 @@ test('new DMS form, existing JDBC connection, shared result panel and cross-chan
   const jdbcEditor=window.activeTextEditor;
   await run('connect');
   const form=panels.at(-1);
+  includes(form.title,'Connect to server');
+  assert.ok(form.webview.html.includes('lang="'+(language==='en'?'en':'zh-CN')+'"'));
+  assert.equal(tree.getChildren().find(n=>n.connection?.id==='demo').label,tr('Local Demo'));
   await form.receive({type:'loadDmsProfiles'});assert.equal(form.messages.at(-1).profiles[0].name,'team-fixture');
   await form.receive({type:'configureDms'});assert.equal(terminals[0].text,'aliyun configure --profile my-dms');assert.equal(terminals[0].execute,false);assert.equal(secretReads,0);
   await form.receive({type:'connect',values:{channel:'dms',name:'DMS fixture',keyword:'sandbox',database:'sandbox',databaseId:'42'}});
@@ -143,8 +155,8 @@ test('new DMS form, existing JDBC connection, shared result panel and cross-chan
   const fileEditor={document:saved};
   const noQuery=calls.length;
   const firstFileHover=await hoverFor(fileEditor);
-  assert.match(firstFileHover.contents[0].value,/请选择|请先选择/);
-  assert.match(firstFileHover.contents[1].value,/选择预览连接/);
+  includes(firstFileHover.contents[0].value,' · Choose a preview connection first');
+  includes(firstFileHover.contents[1].value,'Choose preview connection');
   assert.deepEqual(firstFileHover.contents[1].isTrusted,{enabledCommands:['dbw.loadTableDdl']});
   const fileArgs=loadArgs(firstFileHover.contents[1]);
   assert.equal(calls.length,noQuery);
@@ -164,7 +176,7 @@ test('new DMS form, existing JDBC connection, shared result panel and cross-chan
   const beforeOldLink=calls.length;
   await run('loadTableDdl',...fileArgs);
   assert.equal(calls.length,beforeOldLink);
-  assert.match(errors.pop(),/重新悬停/);
+  includes(errors.pop(),'Hover the table name again in the SQL editor.');
   assert.match((await hoverFor(reopened)).contents[2].value,/jdbc INT/);
   assert.deepEqual(calls.at(-1),['jdbc','legacy','SHOW CREATE TABLE `sandbox`.`file_products`']);
   const workspaceDefaultEditor={document:{...saved,uri:{scheme:'file',toString:()=> 'file:///workspace/default.sql'},
@@ -174,26 +186,26 @@ test('new DMS form, existing JDBC connection, shared result panel and cross-chan
   pickedId=dmsNode.connection.id;
   const beforeDefault=calls.length;
   const defaultNode=()=>tree.getTreeItem(tree.getChildren().find(x=>x.kind==='ddlDefault'));
-  assert.equal(defaultNode().description,'未设置');
+  assert.equal(defaultNode().description,tr('Not set'));
   assert.equal(defaultNode().command.command,'dbw.setWorkspaceDdlConnection');
   await commands.get(defaultNode().command.command)();
   assert.equal(defaultNode().description,dmsNode.connection.name);
   assert.equal(calls.length,beforeDefault);
   const outside={document:{...saved,uri:{scheme:'file',toString:()=> 'file:///outside.sql'}}};
-  assert.match((await hoverFor(outside)).contents[0].value,/请先选择/);
+  includes((await hoverFor(outside)).contents[0].value,' · Choose a preview connection first');
   await run('loadTableDdl',...oldDefaultLink);
   assert.equal(calls.length,beforeDefault);
-  assert.match(errors.pop(),/重新悬停/);
+  includes(errors.pop(),'Hover the table name again in the SQL editor.');
   pickedId=undefined;pickItems=undefined;
   const inherited=await hoverFor(workspaceDefaultEditor);
-  assert.match(inherited.contents[0].value,/DMS.*工作区默认/);
+  includes(inherited.contents[0].value,' · Workspace default');
   assert.match(inherited.contents[2].value,/dms INT/);
   assert.equal(pickItems,undefined);
   assert.deepEqual(calls.at(-1),['dms',dmsNode.connection.id,'SHOW CREATE TABLE `sandbox`.`default_products`']);
   const fileHover=await hoverFor(fileEditor);
   assert.match(fileHover.contents[0].value,/JDBC/);
   const click=fileHover.contents[1];
-  assert.match(click.value,/^\[预览数据\]\(command:dbw\.previewTable\?/);
+  assert.ok(click.value.startsWith('['+tr('Preview data')+'](command:dbw.previewTable?'));
   assert.deepEqual(click.isTrusted,{enabledCommands:['dbw.previewTable']});
   assert.equal(calls.some(call=>call[0]==='preview'),false);
   window.activeTextEditor=dmsEditor; // click must use the originating file, not the active editor
@@ -209,14 +221,14 @@ test('new DMS form, existing JDBC connection, shared result panel and cross-chan
   window.activeTextEditor={document:saved,selection:{active:0}};
   pickedId='reset';
   await run('bindDdlConnection');
-  assert.match((await hoverFor(fileEditor)).contents[0].value,/DMS.*工作区默认/);
+  includes((await hoverFor(fileEditor)).contents[0].value,' · Workspace default');
   await run('setWorkspaceDdlConnection');
   const afterClear=calls.length;
   await run('previewTable',...loadArgs(inherited.contents[1]));
   assert.equal(calls.length,afterClear);
-  assert.match(errors.pop(),/重新悬停/);
-  assert.match((await hoverFor(workspaceDefaultEditor)).contents[0].value,/请先选择/);
-  assert.equal(defaultNode().description,'未设置');
+  includes(errors.pop(),'File or preview connection changed. Hover the table name again.');
+  includes((await hoverFor(workspaceDefaultEditor)).contents[0].value,' · Choose a preview connection first');
+  assert.equal(defaultNode().description,tr('Not set'));
   const beforeRun=calls.length;
   await run('run');
   assert.equal(calls.length,beforeRun); // DDL binding does not enable Run.
@@ -246,7 +258,7 @@ test('new DMS form, existing JDBC connection, shared result panel and cross-chan
   reopenedSql.text='SELECT id FROM other.file_products';
   const beforeMismatch=calls.length;
   const mismatch=await hoverFor({document:reopenedSql});
-  assert.match(mismatch.contents[0].value,/切换当前文件的执行连接/);
+  includes(mismatch.contents[0].value," · Change this file's execution connection");
   assert.doesNotMatch(mismatch.contents[1].value,/command:/);
   assert.equal(calls.length,beforeMismatch);
   pickedId='reset';
@@ -256,7 +268,7 @@ test('new DMS form, existing JDBC connection, shared result panel and cross-chan
   const cancelCalls=calls.length;
   await run('run');
   assert.equal(calls.length,cancelCalls);
-  assert.match(status.text,/选择执行连接/);
+  includes(status.text,'Choose execution connection');
   const directDoc={...saved,uri:{scheme:'file',toString:()=> 'file:///workspace/direct.sql'}};
   window.activeTextEditor={document:directDoc,selection:{active:0}};
   pickedId=jdbc.id;
@@ -269,7 +281,7 @@ test('new DMS form, existing JDBC connection, shared result panel and cross-chan
   await run('run');
   duringPick=undefined;
   assert.equal(calls.length,beforeChangedDoc);
-  assert.match(errors.pop(),/SQL 文件已变更/);
+  includes(errors.pop(),'SQL file changed. Run it again.');
   jdbcEditor.document.text=dmsEditor.document.text='SELECT 1 AS probe;';
   stopped=true;
   window.activeTextEditor=dmsEditor;
@@ -279,7 +291,7 @@ test('new DMS form, existing JDBC connection, shared result panel and cross-chan
   const before=calls.length;
   await run('run');
   assert.equal(calls.length,before);
-  assert.match(currentPanel().messages.at(-1).error,/either online connection/);
+  assert.equal(currentPanel().messages.at(-1).error,tr('{0} stopped without a safe continuation. Verify its state and unlock before using either online connection.','DMS'));
   await run('unlock');
   stopped=false;
   assert.deepEqual((await run('run')).rows,[['jdbc']]);
@@ -290,7 +302,7 @@ test('new DMS form, existing JDBC connection, shared result panel and cross-chan
   const beforeCancel=calls.length;
   await edit.receive({type:'connect',values});
   assert.equal(calls.length,beforeCancel);
-  assert.match(edit.messages.at(-1).message,/not confirmed/);
+  includes(edit.messages.at(-1).message,'Unencrypted JDBC was not confirmed. Choose verified TLS or use DMS.');
   assert.equal(state.get('connections').find(c=>c.id==='legacy').sslMode,undefined);
   allowPlaintext=true;
   await edit.receive({type:'save',values});
@@ -298,10 +310,10 @@ test('new DMS form, existing JDBC connection, shared result panel and cross-chan
   const updated=tree.getChildren().find(x=>x.connection?.id==='legacy');
   assert.equal(updated.connection.sslMode,'DISABLED');
   assert.notEqual(updated.connection.revision,jdbc.revision);
-  assert.equal(tree.getTreeItem(updated).description,'JDBC · Unencrypted');
+  assert.equal(tree.getTreeItem(updated).description,tr('JDBC · Unencrypted'));
   await run('newQuery',updated);
   assert.deepEqual((await run('run')).rows,[['jdbc']]);
-  assert.match(currentPanel().messages.at(-1).target,/JDBC · Unencrypted$/);
+  includes(currentPanel().messages.at(-1).target,'JDBC · Unencrypted');
   window.activeTextEditor={document:directDoc,selection:{active:0}};
   await run('bindConnection'); // Rebind explicitly after the TLS change.
   await run('edit',updated);
@@ -324,7 +336,7 @@ test('new DMS form, existing JDBC connection, shared result panel and cross-chan
   const afterTargetChange=calls.length;
   await run('run');
   assert.equal(calls.length,afterTargetChange);
-  assert.match(errors.pop(),/连接目标或认证已变更/);
+  includes(errors.pop(),'Connection target or credentials changed. Choose an execution connection for this file again.');
   assert.deepEqual(errors,[]);
   const beforeHistory=calls.length, historyId=firstSnapshot.id;
   await firstResult.receive({type:'pin',runId:historyId});
@@ -361,7 +373,7 @@ test('new DMS form, existing JDBC connection, shared result panel and cross-chan
   assert.equal(calls.length,beforeOutside);
   pythonDoc.text='query = f"""SELECT id FROM products WHERE id={key}"""';
   await run('run');
-  assert.match(errors.pop(),/选中纯 SQL/);
+  includes(errors.pop(),'Select plain SQL or put the cursor inside a supported SQL block.');
   assert.equal(calls.length,beforeOutside);
   assert.deepEqual(errors,[]);
   // Each additional case starts from a clean result inventory, not a different connection.
@@ -375,10 +387,10 @@ test('new DMS form, existing JDBC connection, shared result panel and cross-chan
   for(let i=0;i<20 && calls.at(-1)?.[2]!=='SELECT 1 AS probe';i++) await new Promise(resolve=>setImmediate(resolve));
   const whileRunning=calls.length;
   await run('run');
-  assert.match(errors.pop(),/Wait for the active query/);
+  includes(errors.pop(),'Wait for the active query to finish.');
   concurrentEditor.document.text='SELECT id FROM busy_products;';
   const busyHover=await hoverFor(concurrentEditor);
-  assert.match(busyHover.contents[1].value,/在线查询已锁定|另一条在线请求/);
+  assert.ok(['Online queries are locked. Verify the previous query state first.','Another online operation is running. Hover again when it finishes.'].some(key=>busyHover.contents[1].value.includes(tr(key))));
   assert.equal(calls.length,whileRunning);
   release();blocker=undefined;
   assert.deepEqual((await pending).rows,[['jdbc']]);
@@ -395,7 +407,7 @@ test('new DMS form, existing JDBC connection, shared result panel and cross-chan
   vscode.workspace.isTrusted=false;
   concurrentEditor.document.text='SELECT 1 AS probe;';
   await run('run');
-  assert.match(currentPanel().messages.at(-1).error,/untrusted/);
+  includes(currentPanel().messages.at(-1).error,'Online queries are disabled in untrusted workspaces.');
   assert.equal(calls.length,beforeTrust);
   assert.equal(await hoverFor(concurrentEditor),undefined);
   vscode.workspace.isTrusted=true;
@@ -405,7 +417,7 @@ test('new DMS form, existing JDBC connection, shared result panel and cross-chan
   assert.deepEqual(deleted,['jdbc:legacy']);
   const afterRemove=calls.length;
   await run('run');
-  assert.match(errors.pop(),/连接目标或认证已变更/);
+  includes(errors.pop(),'Connection target or credentials changed. Choose an execution connection for this file again.');
   assert.equal(calls.length,afterRemove);
   pickHistoryId=archived.id;
   await run('history');

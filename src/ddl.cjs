@@ -95,12 +95,12 @@ function tableDdl(result) {
   const at=result.columns.findIndex(c=>/^create[ _]table$/i.test(c.name.trim()));
   const ddl=result.rows.length===1 && !result.truncated && at>=0 ? result.rows[0][at] : undefined;
   if (typeof ddl!=='string' || !/^\s*CREATE\s+(?:TEMPORARY\s+)?TABLE\b/i.test(ddl)) {
-    throw Error('未收到普通表的建表定义。');
+    throw Error("No physical table definition was returned.");
   }
   // External storage/connector properties and explicit secret-like fields are not previewed.
   if (/(?:^|[^a-z0-9])(?:password|passwd|authentication_string|access[_ .-]?token|access[_ .-]?key(?:[_ .-]?(?:id|secret))?|secret[_ .-]?key|private[_ .-]?key|api[_ .-]?key|credentials)(?=$|[^a-z0-9])/i.test(ddl) ||
       /\bENGINE\s*=\s*[`"']?(?!(?:OLAP|InnoDB|MyISAM|MEMORY|Aria|ARCHIVE|CSV|BLACKHOLE|NDB(?:CLUSTER)?|PERFORMANCE_SCHEMA)\b)\w+/i.test(ddl)) {
-    throw Error('表定义包含外部引擎或疑似凭据，不显示预览。');
+    throw Error("The table definition contains an external engine or possible credentials and cannot be previewed.");
   }
   return ddl;
 }

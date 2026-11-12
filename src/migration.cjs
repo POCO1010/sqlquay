@@ -1,5 +1,6 @@
 'use strict';
 const {randomUUID}=require('node:crypto');
+const {translator}=require('../media/i18n.js');
 const {connectionConfig}=require('./jdbc.cjs'),{dmsConfig}=require('./dms.cjs');
 const LEGACY_ID='local-workbench.database-workbench',PUBLIC_ID='TomMajor.sqlquay';
 const globalMark='legacyMigration:global',workspaceMark='legacyMigration:workspace';
@@ -92,16 +93,17 @@ function importer(context,vscode,onImported,onBusy) {
   return {start,receive};
 }
 async function sendLegacy(context,vscode,token,{knownIds=[],workspaceImported=false}={}) {
+  const tr=translator(vscode.env?.language);
   const target=vscode.extensions.getExtension(PUBLIC_ID);
   if(!target?.isActive || typeof target.exports?.importLegacyData!=='function') throw Error('Start migration from SQLQuay, not the legacy helper.');
   const known=new Set(knownIds),all=context.globalState.get('connections',[]);
   const candidates=all.filter(c=>!known.has(c.id));
   if(!candidates.length && workspaceImported) return {alreadyImported:true};
-  const choices=candidates.length ? await vscode.window.showQuickPick(candidates.map(connection=>({label:connection.name,description:connection.channel==='dms'?'DMS':connection.sslMode==='DISABLED'?'JDBC · TLS Disabled':'JDBC',picked:true,connection})),{canPickMany:true,title:'选择要迁移的旧版连接',placeHolder:'只新增所选连接；新版已有连接和单文件选择保持不变'}) : [];
+  const choices=candidates.length ? await vscode.window.showQuickPick(candidates.map(connection=>({label:connection.name,description:connection.channel==='dms'?'DMS':connection.sslMode==='DISABLED'?tr("JDBC · TLS Disabled"):'JDBC',picked:true,connection})),{canPickMany:true,title:tr("Choose legacy connections to import"),placeHolder:tr("Only selected new connections are added; existing connections and file choices are kept.")}) : [];
   if(!choices || (candidates.length && !choices.length)) return {cancelled:true};
   const connections=choices.map(item=>item.connection);
-  const action='导入到 SQLQuay';
-  const accepted=await vscode.window.showWarningMessage(`把所选 ${connections.length} 个旧版连接、凭据和相关工作区绑定导入 TomMajor.sqlquay？新版已有连接保持不变。凭据仅在扩展内存中传递，旧版数据保留。`,{modal:true},action);
+  const action=tr("Import to SQLQuay");
+  const accepted=await vscode.window.showWarningMessage(tr('Import {0} selected legacy connections, credentials and related workspace bindings into TomMajor.sqlquay? Existing SQLQuay connections are kept. Credentials only pass through extension memory; legacy data is retained.',connections.length),{modal:true},action);
   if(accepted!==action) return {cancelled:true};
   const secrets=Object.create(null);
   for(const c of connections) if(c.channel!=='dms') {

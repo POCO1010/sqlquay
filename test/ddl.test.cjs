@@ -43,9 +43,9 @@ test('uses the named DDL column and refuses partial or sensitive results',()=>{
   const grid=(ddl,truncated=false)=>({columns:[{name:'Table'},{name:'Create Table'}],rows:[['t',ddl]],truncated});
   const valid='CREATE TABLE t (id BIGINT) ENGINE=OLAP';
   assert.equal(tableDdl(grid(valid)),valid);
-  assert.throws(()=>tableDdl(grid(valid,true)),/未收到/);
+  assert.throws(()=>tableDdl(grid(valid,true)),/No physical table/);
   for(const ddl of ["CREATE TABLE t (id INT) ENGINE=JDBC", "CREATE TABLE t (id INT) PROPERTIES ('jdbc_password'='fixture')","CREATE EXTERNAL TABLE t (id INT)"]) {
-    assert.throws(()=>tableDdl(grid(ddl)), /不显示|未收到/);
+    assert.throws(()=>tableDdl(grid(ddl)), /cannot be previewed|No physical table/);
   }
 });
 test('function parentheses and correlated subqueries resolve visible aliases, with nearest shadowing',()=>{

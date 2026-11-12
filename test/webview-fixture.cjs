@@ -3,7 +3,7 @@ const fs=require('node:fs'),path=require('node:path'),assert=require('node:asser
 const {chromium}=require(process.env.DBW_PLAYWRIGHT || 'playwright');
 const {connectHtml,resultHtml}=require('../src/webviews.cjs');
 const media=path.join(__dirname,'../media');
-const assets={csp:"'self'",css:'/workbench.css',script:'/workbench.js',icon:'/database.svg'};
+const assets={csp:"'self'",css:'/workbench.css',script:'/workbench.js',i18n:'/i18n.js',icon:'/database.svg'};
 const output=process.argv[2];
 const external=[],errors=[];
 async function create(browser,html,width=1120,light=false) {
@@ -19,7 +19,7 @@ async function create(browser,html,width=1120,light=false) {
     if(url.origin!=='http://workbench.invalid'){external.push(url.origin);return route.abort();}
     if(url.pathname==='/')return route.fulfill({contentType:'text/html',body:html});
     const name=url.pathname.slice(1);
-    if(!['workbench.js','workbench.css','database.svg'].includes(name))return route.abort();
+    if(!['workbench.js','i18n.js','workbench.css','database.svg'].includes(name))return route.abort();
     return route.fulfill({path:path.join(media,name)});
   });
   await page.goto('http://workbench.invalid/');
@@ -116,7 +116,7 @@ async function main(){
    await table.getByRole('button',{name:/Run/}).click();
    assert.equal((await table.evaluate(()=>window.sent.at(-1))).sql,'SELECT 1 AS probe;');
    await dispatch(table,{...state,id:3,mode:'PREVIEW',sql:'sandbox.products'});
-   const preview=table.getByRole('textbox',{name:'预览表'});
+   const preview=table.getByRole('textbox',{name:'Preview table'});
    assert.equal(await preview.inputValue(),'sandbox.products');
    assert.equal(await preview.isEditable(),false);
    assert.equal(await table.getByRole('button',{name:/Run/}).isVisible(),false);
@@ -131,21 +131,21 @@ async function main(){
      rows:[['1.2'],['-2'],['9007199254740993.00000000000001'],['9007199254740993'],['1.10'],['-10'],[null]],truncated:false}});
    await table.getByRole('button',{name:'amount',exact:true}).click();
    assert.deepEqual(await table.locator('tbody tr td').allTextContents(),['NULL','-10','-2','1.10','1.2','9007199254740993','9007199254740993.00000000000001']);
-   assert.equal(await table.locator('#total').textContent(),'已加载 7 行');
+   assert.equal(await table.locator('#total').textContent(),'Loaded 7 rows');
    if(output) await table.screenshot({path:path.join(output,'numeric-sort.png')});
    await dispatch(table,{...state,id:6,mode:'PREVIEW',sql:'sandbox.products',result:{columns:[{name:'id',type:''}],
      rows:Array.from({length:100},(_,i)=>[String(i+1)]),truncated:false}});
-   assert.equal(await table.locator('#total').textContent(),'已加载 100 行 · 预览上限 100 行');
+   assert.equal(await table.locator('#total').textContent(),'Loaded 100 rows · Preview limit: 100 rows');
    await search.fill('100');
-   assert.equal(await table.locator('#total').textContent(),'匹配 1 / 已加载 100 行 · 预览上限 100 行');
+   assert.equal(await table.locator('#total').textContent(),'Matched 1 / Loaded 100 rows · Preview limit: 100 rows');
    if(output) await table.screenshot({path:path.join(output,'preview-count.png')});
    assert.deepEqual(external,[]);assert.deepEqual(errors,[]);
    await dispatch(table,{...state,id:7,pinned:true,timings:{connect:3,preflight:4,execute:2},elapsed:12});
-   assert.equal(await table.getByRole('button',{name:'取消固定',exact:true}).getAttribute('aria-pressed'),'true');
-   assert.match(await table.locator('#phases').textContent(),/连接 3 ms · 预检 4 ms · 执行 2 ms · 其他 3 ms/);
-   await table.getByRole('button',{name:'取消固定',exact:true}).click();
+   assert.equal(await table.getByRole('button',{name:'Unpin result',exact:true}).getAttribute('aria-pressed'),'true');
+   assert.match(await table.locator('#phases').textContent(),/Connection 3 ms · Preflight 4 ms · Execution 2 ms · Other 3 ms/);
+   await table.getByRole('button',{name:'Unpin result',exact:true}).click();
    assert.equal((await table.evaluate(()=>window.sent.at(-1))).type,'pin');
-   await table.getByRole('button',{name:'会话历史',exact:true}).click();
+   await table.getByRole('button',{name:'Session history',exact:true}).click();
    assert.equal((await table.evaluate(()=>window.sent.at(-1))).type,'history');
    await table.getByRole('textbox',{name:'SQL',exact:true}).fill('SELECT 1 AS pending_edit;');
    for(const pinned of [false,true]) {

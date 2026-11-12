@@ -22,7 +22,7 @@ test('comments, other fences, dynamic templates, escaped and unfinished strings 
     ['markdown','```python\n# ```sql\nSELECT id FROM products\n```']]) {
     assert.equal(regionAt(doc(code,language),code.indexOf('products')),undefined,code);
   }
-  assert.throws(()=>selectedSql('SELECT id FROM ${table}'),/模板/);
+  assert.throws(()=>selectedSql('SELECT id FROM ${table}'),/template variables/);
   assert.equal(selectedSql('SELECT 1'),'SELECT 1');
 });
 test('table and alias field suggestions use cached metadata only',()=>{
@@ -41,7 +41,7 @@ test('open or pinned results are not evicted, closed history is bounded and clea
   const store=new Sessions(2),entry=id=>({view:{id,state:'done'}});
   const one=store.add(entry(1));one.panel={};
   const two=store.add(entry(2));two.pinned=true;
-  assert.throws(()=>store.add(entry(3)),/保留/);
+  assert.throws(()=>store.add(entry(3)),/retained/);
   two.pinned=false;store.add(entry(3));
   assert.deepEqual(store.entries.map(e=>e.view.id),[1,3]);
   store.clearClosed();

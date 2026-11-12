@@ -29,3 +29,10 @@ test('Marketplace packaging checks PNG dimensions before uploading',()=>{
   assert.throws(()=>validateIcon(Buffer.from('not a PNG')),/PNG/);
   assert.deepEqual(validateIcon(require('node:fs').readFileSync(require('node:path').join(__dirname,'..',manifest.icon))),{width:512,height:512});
 });
+
+test('the password label translation is allowed only in the runtime catalog',()=>{
+  const label=['"Password"','"密码",'].join(': ');
+  assert.deepEqual(issues(label,'media/i18n.js'),[]);
+  assert.equal(issues(label,'config.json').length,1);
+  assert.equal(issues(['password','"not-a-real-password"'].join('='),'media/i18n.js').length,1);
+});
