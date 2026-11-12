@@ -78,8 +78,8 @@ for(const language of ['zh-cn','en']) test('connection routing, safety gates, ho
           if (table) { calls.push(['preview','dms',connection.id,table,limit]);return grid(['id'],[['2']]); }
           calls.push(['dms',connection.id,sql]);
           if(stopped) throw new DmsStopped('DMS fixture stopped.');
-          if(sql==='SHOW TABLES') return grid(['Tables_in_sandbox'],[['products']]);
-          if(sql.startsWith('SHOW CREATE TABLE')) return grid(['Table','Create Table'],[['products','CREATE TABLE products ('+(connection.accountId?'db'+connection.databaseId+'_field':'dms')+' INT)']]);
+          if(sql==='SHOW TABLES') return connection.engine==='ots' ? grid(['Table_type','Tables_in_sandbox'],[['BASE TABLE','products']]) : grid(['Tables_in_sandbox'],[['products']]);
+          if(sql.startsWith('SHOW CREATE TABLE')) return grid(['Table','Create Table'],[['products','CREATE TABLE products ('+(connection.accountId?'db'+connection.databaseId+'_field':'dms')+' INT)'+(connection.engine==='ots'?' ENGINE=Tablestore':'')]]);
           if(sql.startsWith('DESCRIBE')) return grid(['Field','Type'],[['id','BIGINT']]);
           return grid(['probe'],[['dms']]);
         }};
@@ -610,6 +610,8 @@ for(const language of ['zh-cn','en']) test('connection routing, safety gates, ho
   expandListener({element:sourceSchemas[3]});await new Promise(setImmediate);
   assert.equal(akExecutions.length,callsBeforeSave+1);assert.equal(akExecutions.at(-1).databaseId,'430');assert.equal(akExecutions.at(-1).sql,'SHOW TABLES');
   expandListener({element:sourceSchemas[3]});await new Promise(setImmediate);assert.equal(akExecutions.length,callsBeforeSave+1);
+  await run('refresh',sourceSchemas[4]);
+  assert.deepEqual(tree.getChildren(tree.getChildren(sourceSchemas[4])[0]).map(n=>n.label),['products']);
   await run('newQuery',sourceSchemas[4]);const otsEditor=window.activeTextEditor;otsEditor.document.text='SELECT id FROM products;';
   const otsHover=await hoverFor(otsEditor);assert.ok(otsHover.contents.some(c=>c.value.includes('CREATE TABLE products')));
   assert.ok(!otsHover.contents.some(c=>c.value.includes('command:dbw.previewTable')));

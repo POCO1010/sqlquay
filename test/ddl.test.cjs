@@ -66,3 +66,14 @@ test('nested CTE names stay in their query block and do not hide outer physical 
   const siblings='SELECT * FROM (WITH orders AS (SELECT 1) SELECT * FROM orders) a JOIN (SELECT * FROM orders) b';
   assert.equal(relationAt(siblings,siblings.lastIndexOf('orders'),'dw')?.table,'orders');
 });
+test('native Tablestore DDL is allowed only for its verified engine; secret and external guards remain',()=>{
+  const grid=ddl=>({columns:[{name:'Create Table'},{name:'Table'}],rows:[[ddl,'products']],truncated:false});
+  const ddl='CREATE TABLE products (id BIGINT) ENGINE=Tablestore';
+  assert.equal(tableDdl(grid(ddl),'ots'),ddl);
+  for(const engine of [undefined,'mysql','drds','doris']) assert.throws(()=>tableDdl(grid(ddl),engine),/cannot be previewed/);
+  for(const ddl of ['CREATE TABLE products (id BIGINT) ENGINE=JDBC',
+    "CREATE TABLE products (id BIGINT) ENGINE=Tablestore PROPERTIES ('access_key_secret'='fixture')",
+    'CREATE TABLE products (password VARCHAR(64)) ENGINE=Tablestore']) {
+    assert.throws(()=>tableDdl(grid(ddl),'ots'),/cannot be previewed/);
+  }
+});

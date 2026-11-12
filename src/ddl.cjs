@@ -91,15 +91,17 @@ function relationAt(sql, offset, database) {
   if (ref?.physical) return {table:ref.table,schema:ref.schema,start:tokens[at].start,end:tokens[at].end};
 }
 
-function tableDdl(result) {
+function tableDdl(result,sourceEngine) {
   const at=result.columns.findIndex(c=>/^create[ _]table$/i.test(c.name.trim()));
   const ddl=result.rows.length===1 && !result.truncated && at>=0 ? result.rows[0][at] : undefined;
   if (typeof ddl!=='string' || !/^\s*CREATE\s+(?:TEMPORARY\s+)?TABLE\b/i.test(ddl)) {
     throw Error("No physical table definition was returned.");
   }
+  const engines=[...ddl.matchAll(/\bENGINE\s*=\s*[`"']?(\w+)/gi)].map(match=>match[1]);
+  const native=sourceEngine==='ots' ? /^Tablestore$/i : /^(?:OLAP|InnoDB|MyISAM|MEMORY|Aria|ARCHIVE|CSV|BLACKHOLE|NDB(?:CLUSTER)?|PERFORMANCE_SCHEMA)$/i;
   // External storage/connector properties and explicit secret-like fields are not previewed.
   if (/(?:^|[^a-z0-9])(?:password|passwd|authentication_string|access[_ .-]?token|access[_ .-]?key(?:[_ .-]?(?:id|secret))?|secret[_ .-]?key|private[_ .-]?key|api[_ .-]?key|credentials)(?=$|[^a-z0-9])/i.test(ddl) ||
-      /\bENGINE\s*=\s*[`"']?(?!(?:OLAP|InnoDB|MyISAM|MEMORY|Aria|ARCHIVE|CSV|BLACKHOLE|NDB(?:CLUSTER)?|PERFORMANCE_SCHEMA)\b)\w+/i.test(ddl)) {
+      engines.some(engine=>!native.test(engine))) {
     throw Error("The table definition contains an external engine or possible credentials and cannot be previewed.");
   }
   return ddl;

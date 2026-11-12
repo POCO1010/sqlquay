@@ -82,8 +82,8 @@ s=a[a.index('--script')+1]
 if s=='SELECT 1 AS timeout_probe':
  print(json.dumps({'Results':[{'Success':False,'Message':'execute script timeout'}]}));sys.exit(0)
 elif s=='SELECT 1 AS probe':rows=[{'probe':'1'}]
-elif s=='SHOW FULL TABLES':rows=[{'Tables_in_sandbox':'products','Table_type':'BASE TABLE'}]
-elif s.startswith('SHOW CREATE TABLE'):rows=[{'Table':'products','Create Table':'CREATE TABLE products (id BIGINT)'}]
+elif s=='SHOW FULL TABLES':rows=[{'Table_type':'BASE TABLE','Tables_in_sandbox':'products'}]
+elif s.startswith('SHOW CREATE TABLE'):rows=[{'Table':'products','Create Table':'CREATE TABLE products (id BIGINT)'+(' ENGINE=Tablestore' if a[a.index('--db-id')+1]=='431' else '')}]
 elif s.startswith('SHOW INDEX'):rows=[{'Key_name':'PRIMARY','Column_name':'id','Seq_in_index':1}]
 elif s.startswith('EXPLAIN SHARDING'):
  assert 'LIMIT 100' not in s;rows=[{'SHARD_COUNT':2 if 'multi_shard' in s else 1}]
@@ -135,8 +135,8 @@ print(json.dumps({'Results':[{'Success':True,'Rows':rows}]}))
   assert.equal(calls().filter(x=>x.script.startsWith('/*TDDL:') && x.script.includes('drds_timeout')).length,1);
   assert.ok(!calls().some(x=>x.script.startsWith('/*TDDL:') && /large|multi_shard/.test(x.script)));
   const ots={...target,...libraries.databases[0]};
-  assert.deepEqual((await query(ots,'SHOW TABLES',10000,undefined,auth)).rows,[['products','BASE TABLE']]);
-  assert.deepEqual((await query(ots,'SHOW CREATE TABLE `products`',1,undefined,auth)).rows,[['products','CREATE TABLE products (id BIGINT)']]);
+  assert.deepEqual((await query(ots,'SHOW TABLES',10000,undefined,auth)).rows,[['BASE TABLE','products']]);
+  assert.deepEqual((await query(ots,'SHOW CREATE TABLE `products`',1,undefined,auth)).rows,[['products','CREATE TABLE products (id BIGINT) ENGINE=Tablestore']]);
   assert.deepEqual((await query(ots,'DESCRIBE `products`',10000,undefined,auth)).rows[0],['id','BIGINT']);
   assert.ok(calls().some(x=>x.script==='SHOW FULL TABLES'));
   const dataBefore=calls().filter(x=>x.operation[1]==='execute-script').length;

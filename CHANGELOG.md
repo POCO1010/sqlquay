@@ -2,6 +2,8 @@
 
 ## 0.8.0
 
+- 实库兼容 Tablestore 的表清单列顺序及原生 `ENGINE=Tablestore` DDL；仅已核实的 OTS 连接开放该定义，凭据和其它外部引擎检查保留。
+
 - DMS 按实例 → 数据库 → 表组织；支持 MySQL/RDS、PolarDB MySQL、SelectDB/Doris、PolarDB-X/DRDS 和 Tablestore 的实例发现。生产、测试、开发、预发与其它 DMS 环境均可选择，实例和库列表可分页。
 - DRDS 使用独立的单分片及底层扫描计划预检，保留源库 10 万行阈值、前导索引检查与受控超时。Tablestore 按确认范围只开放 SQL 映射表列表、字段和真实 DDL，数据查询与预览继续拒绝。
 - AccessKey 表单的“保存并打开”仅保存已核实的配置，不再遍历所有库；展开当前库时加载表，缓存命中不重复读取，加载失败可显式刷新。JDBC 与高级 profile 的连接检查仍保留。

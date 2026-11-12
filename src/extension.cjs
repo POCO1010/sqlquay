@@ -335,7 +335,7 @@ function activate(context) {
       let preview, fields;
       try {
         const result=await query(connection,'SHOW CREATE TABLE ' + relation(connection,table),1);
-        const ddl=tableDdl(result);
+        const ddl=tableDdl(result,connection.engine);
         preview={ddl:ddl.slice(0,ddlPreviewLimit),truncated:ddl.length>ddlPreviewLimit};
         fields=ddlColumns(ddl);
       } catch (error) {
@@ -652,7 +652,10 @@ function activate(context) {
     panel.webview.html=connectHtml(assetPaths(panel.webview));
   }
 
-  function tableNames(catalog) { return catalog.rows.map(row=>row[0]).filter(name=>typeof name==='string' && name); }
+  function tableNames(catalog) {
+    const at=Math.max(0,catalog.columns.findIndex(column=>/^Tables_in_/i.test(column.name)));
+    return catalog.rows.map(row=>row[at]).filter(name=>typeof name==='string' && name);
+  }
   register('connect',()=>openForm());
   register('edit',node=>{const connection=configured(node); if(connection.engine!=='demo') openForm(connection);});
   register('addDmsDatabases',node=>{
