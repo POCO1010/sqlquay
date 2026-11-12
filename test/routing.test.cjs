@@ -442,6 +442,9 @@ for(const language of ['zh-cn','en']) test('connection routing, safety gates, ho
   assert.equal(akSearches.length,1);assert.equal(akSecrets.size,0);
   assert.equal(JSON.stringify(state.get('connections')),oldConnections);
   assert.ok(!JSON.stringify(akForm.messages).includes(akAuth.accessKeySecret));
+  await akForm.receive({type:'save',values:{...akValues,...akAuth,accessKeySecret:'fixture-replacement-secret'}});
+  includes(akForm.messages.at(-1).message,'Search and select the database with this AccessKey first.');assert.equal(akSecrets.size,0);
+  await akForm.receive({type:'searchDmsDatabases',values:{...akValues,...akAuth}});
   await akForm.receive({type:'save',values:{...akValues,databaseId:'43'}});
   includes(akForm.messages.at(-1).message,'Search and select the database with this AccessKey first.');
   assert.equal(akSecrets.size,0);
@@ -477,12 +480,12 @@ for(const language of ['zh-cn','en']) test('connection routing, safety gates, ho
   const originalBindings=new Map(previewBindings);
   await run('connect');const multiForm=panels.at(-1);
   await multiForm.receive({type:'searchDmsDatabases',values:{...akAuth,keyword:'multi-a',region:'cn-beijing'}});
-  await multiForm.receive({type:'searchDmsDatabases',values:{keyword:'multi-b',region:'cn-beijing'}});
+  await multiForm.receive({type:'searchDmsDatabases',values:{...akAuth,keyword:'multi-b',region:'cn-beijing'}});
   await multiForm.receive({type:'save',values:{...multiValues,databases:[...targets,{keyword:'not-searched',database:'forged',databaseId:'999'}]}});
   includes(multiForm.messages.at(-1).message,'Search and select the database with this AccessKey first.');assert.equal(akSecrets.size,0);
-  failConnectionSave=true;await multiForm.receive({type:'save',values:multiValues});assert.equal(akSecrets.size,0);
+  failConnectionSave=true;await multiForm.receive({type:'save',values:{...multiValues,...akAuth}});assert.equal(akSecrets.size,0);
   assert.deepEqual(JSON.parse(oldConnections),state.get('connections'));
-  const beforeSaveQueries=akExecutions.length;await multiForm.receive({type:'save',values:multiValues});
+  const beforeSaveQueries=akExecutions.length;await multiForm.receive({type:'save',values:{...multiValues,...akAuth}});
   assert.equal(akExecutions.length,beforeSaveQueries);assert.equal(akSecrets.size,1);
   let account=tree.getChildren().find(n=>n.kind==='dmsAccount');const ownerId=account.connection.id,revision=account.connection.revision;
   const schemas=tree.getChildren(account);assert.deepEqual(schemas.map(n=>n.label),['sandbox','orders']);

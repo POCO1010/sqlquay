@@ -91,3 +91,18 @@ test('saved single AK targets and custom CLI-profile lookup names survive edits 
   const profile=create();profile.change('channel','dms');profile.change('authMode','profile');profile.fields.schema.value='sandbox';profile.fields.databaseId.value='42';profile.submit();
   assert.equal(profile.sent.at(-1).values.keyword,'sandbox');
 });
+
+test('AK inputs stay masked in the form through multi-selection, repeated searches and failed saves',()=>{
+  const view=create();view.change('channel','dms');
+  view.input('accessKeyId','fixture-key-id');view.input('accessKeySecret','fixture-key-secret');view.input('keyword','sand');
+  const retained=()=>{assert.equal(view.fields.accessKeyId.value,'fixture-key-id');assert.equal(view.fields.accessKeySecret.value,'fixture-key-secret');};
+  view.get('dms-search').onclick();retained();view.receive({type:'dmsDatabases',databases:rows});
+  view.check(0,true);retained();view.check(1,true);retained();view.check(0,false);retained();
+  view.input('keyword','orders');view.get('dms-search').onclick();retained();
+  assert.equal(view.sent.at(-1).values.accessKeySecret,'fixture-key-secret');
+  view.receive({type:'dmsDatabases',databases:[{database:'orders',databaseId:'44',label:'orders · #44'}]});view.check(0,true);retained();
+  view.submit();retained();view.receive({type:'error',message:'Offline save failure'});retained();
+  view.submit();retained();assert.equal(view.sent.at(-1).values.databases.length,2);
+  const html=connectHtml({language:'en',csp:"'self'",css:'a',script:'b',i18n:'c',icon:'d'});
+  for(const field of ['accessKeyId','accessKeySecret'])assert.ok(html.includes('name="'+field+'" type="password" autocomplete="off"'));
+});

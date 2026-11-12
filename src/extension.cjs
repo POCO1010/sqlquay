@@ -420,7 +420,12 @@ function activate(context) {
     let busy=false,disposed=false,draftAuth,savedAuth;
     const verifiedSearch=new Map(),databaseKey=c=>JSON.stringify([c.databaseId,c.database]);
     const formAuth=async values=>{
-      if(values.accessKeyId || values.accessKeySecret) draftAuth=accessKeyCredentials(values);
+      if(values.accessKeyId || values.accessKeySecret) {
+        const entered=accessKeyCredentials(values);
+        if(!draftAuth || draftAuth.accessKeyId!==entered.accessKeyId || draftAuth.accessKeySecret!==entered.accessKeySecret) {
+          draftAuth=entered;verifiedSearch.clear();
+        }
+      }
       if(draftAuth) return draftAuth;
       if(edit && authMode(edit)==='accessKey') {savedAuth??=await dmsCredentialsFor(edit);return savedAuth;}
       return accessKeyCredentials({});

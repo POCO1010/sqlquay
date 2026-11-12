@@ -10,7 +10,6 @@
     const databaseKey=row=>JSON.stringify([row.databaseId,row.database]);
     const method=()=>form.elements.channel.value,authMode=()=>form.elements.authMode.value;
     const loadProfiles=()=>{$('dms-auth-status').textContent=tr('Reading local CLI profiles…');vscode.postMessage({type:'loadDmsProfiles'});};
-    const clearKeys=()=>{for(const key of ['accessKeyId','accessKeySecret']) form.elements[key].value='';};
     const syncSelection=()=>{
       $('dms-selected').hidden=!selectedDatabases.size;
       $('dms-selection-count').textContent=tr('Selected databases: {0}. Save or connect when ready.',selectedDatabases.size);
@@ -66,7 +65,7 @@
       const values={keyword:databaseInput.value,region:form.elements.region.value,accessKeyId:form.elements.accessKeyId.value,accessKeySecret:form.elements.accessKeySecret.value};
       if(!values.keyword.trim() || !values.region.trim()) {feedback.textContent=tr('Enter a region and a database name.');return;}
       clearResults();searchedKeyword=values.keyword.trim();feedback.textContent=tr('Searching databases…');working(true);
-      vscode.postMessage({type:'searchDmsDatabases',values});clearKeys();
+      vscode.postMessage({type:'searchDmsDatabases',values});
     };
     form.addEventListener('input',e=>{
       if(authMode()!=='accessKey') return;
@@ -108,7 +107,7 @@
       }
       const type=e.submitter?.value==='save'?'save':'connect';
       feedback.textContent=type==='connect'?tr('Checking connection…'):tr('Saving…');working(true);
-      vscode.postMessage({type,values});form.elements.password.value='';clearKeys();
+      vscode.postMessage({type,values});form.elements.password.value='';
     });
     $('close').onclick=()=>vscode.postMessage({type:'close'});
     window.addEventListener('message',({data:m})=>{
