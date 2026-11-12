@@ -4,6 +4,7 @@ const {accessSync, constants} = require('node:fs');
 const path = require('node:path');
 const {homedir} = require('node:os');
 const {readonly} = require('./query.cjs');
+const {progressReader,diagnosticError,attachDiagnostic}=require('./execution.cjs');
 class UnknownState extends Error {
   constructor() { super('JDBC may still be running on the server. Confirm the query ended before unlocking.'); }
 }
@@ -18,10 +19,11 @@ function connectionConfig(input) {
   if (!['VERIFY_IDENTITY','DISABLED'].includes(sslMode)) throw Error('Choose a supported JDBC TLS mode.');
   return {name, group, engine, host, port, database, sslMode};
 }
-function call(command, args, body) {
+function call(command, args, body, onProgress) {
   return new Promise((resolve, reject) => {
-    const child = spawn(command, args, {stdio: ['pipe','pipe','ignore'], windowsHide: true});
+    const child = spawn(command, args, {stdio: ['pipe','pipe','pipe'], windowsHide: true});
     let bytes = 0, chunks = [];
+    child.stderr.on('data',progressReader(onProgress));
     child.on('error', error => reject(error.code === 'ENOENT' ? Error('Python executable was not found.') : new UnknownState()));
     child.stdin.on('error', () => { /* exit status distinguishes a rejected or indeterminate run */ });
     child.stdout.on('data', chunk => {
@@ -39,6 +41,7 @@ function call(command, args, body) {
 function makeJdbc(settings, extensionPath, transport = call) {
   return async (connection, credentials, sql, limit = 200, table) => {
     const statement = table === undefined ? readonly(sql) : undefined;
+    settings.onProgress?.('prepare');
     const jar = expand(settings.jar), guard = expand(settings.guard);
     if (!path.isAbsolute(jar) || !jar.toLowerCase().endsWith('.jar') || jar.includes(path.delimiter)) throw Error('Set dbWorkbench.driverJar to an absolute MySQL Connector/J JAR path.');
     try { accessSync(jar, constants.R_OK); accessSync(guard, constants.R_OK); }
@@ -48,9 +51,9 @@ function makeJdbc(settings, extensionPath, transport = call) {
       user:credentials.user, password:credentials.password, sql:statement, limit,
       ...(table === undefined ? {} : {table,schema:target.database})};
     const response = await transport(expand(settings.python), ['-I','-B',path.join(extensionPath,'scripts','jdbc_guard.py'), guard, expand(settings.java),
-      [path.join(extensionPath,'build','jdbc'),jar].join(path.delimiter)], payload);
+      [path.join(extensionPath,'build','jdbc'),jar].join(path.delimiter)], payload, settings.onProgress);
     if (response?.error) {
-      const error=response.error==='unknown' ? new UnknownState() : Error(response.message??'JDBC execution failed.');
+      const error=response.error==='unknown' ? attachDiagnostic(new UnknownState(),response.diagnostic) : diagnosticError(response.diagnostic,response.message??'JDBC execution failed.');
       error.timings=response.timings;throw error;
     }
     if (!Array.isArray(response?.columns) || !response.columns.every(c => typeof c?.name === 'string' && typeof c.type === 'string') ||

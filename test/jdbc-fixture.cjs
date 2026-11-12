@@ -14,7 +14,7 @@ async function main() {
     fs.writeFileSync(manifest,'Manifest-Version: 1.0\nImplementation-Version: 8.0.32\n\n');
     const jar=path.join(temp,'fixture.jar');
     execFileSync('jar',['cfm',jar,manifest,'-C',driver,'.']);
-    fs.mkdirSync(path.join(temp,'policy'));fs.copyFileSync(path.join(root,'policy','engine_policy.py'),path.join(temp,'policy','engine_policy.py'));
+    fs.mkdirSync(path.join(temp,'policy'));fs.copyFileSync(path.join(root,'policy','engine_policy.py'),path.join(temp,'policy','engine_policy.py'));fs.copyFileSync(path.join(root,'policy','workbench_runtime.py'),path.join(temp,'policy','workbench_runtime.py'));
     for (const script of ['jdbc_guard.py','preview_safe.py']) fs.copyFileSync(path.join(root,'scripts',script),path.join(temp,'scripts',script));
     const original=process.env.DBW_TEST_GUARD || path.join(root,'policy','query_guard.py');
     const guard=path.join(temp,'query_guard.py');
@@ -45,14 +45,23 @@ async function main() {
     const sample=await query(connection,auth,undefined,100,'products');
     assert.equal(sample.rows.length,100);
     assert.deepEqual(sample.columns.map(c=>c.name),['id']);
-    await assert.rejects(query(connection,auth,undefined,100,'unknown'),/Full-scan estimate/);
-    await assert.rejects(query(connection,auth,undefined,100,'too_large'),/Full-scan estimate/);
+    await assert.rejects(query(connection,auth,undefined,100,'unknown'),/estimate is unknown/);
+    await assert.rejects(query(connection,auth,undefined,100,'too_large'),/scan limit/);
     await assert.rejects(query(connection,auth,undefined,100,'preview_timeout'),UnknownState);
     assert.equal((await query({...connection,engine:'doris',port:9030},auth,undefined,100,'products')).rows.length,100);
     const olap=await query({...connection,engine:'doris',port:9030},auth,'SELECT id FROM products WHERE id = 1 LIMIT 1');
     assert.equal(olap.rows.length,1);
     const unencrypted=await query({...connection,port:3307,sslMode:'DISABLED'},auth,'SELECT 1 AS probe');
     assert.equal(unencrypted.rows.length,1);
+    let completed=false;const phases=[];
+    const live=makeJdbc({jar,guard,java:'java',python:'python3',onProgress:phase=>{assert.equal(completed,false);phases.push(phase);}},temp);
+    await live(connection,auth,'SELECT id, price FROM products WHERE id = 1 LIMIT 1');completed=true;
+    assert.deepEqual(phases,['prepare','preflight','waiting','connect','preflight','execute','cleanup']);
+    completed=false;
+    await assert.rejects(live(connection,auth,undefined,100,'too_large'),error=>error.diagnostic?.phase==='preflight' && error.diagnostic.estimatedRows===100001 && error.diagnostic.maxRows===100000);
+    for(const [credentials,sql,code,phase] of [[{...auth,password:'fixture-secret'},'SELECT 1 AS probe','authentication_failed','connect'],[auth,'SELECT 1 AS permission_probe','permission_denied','execute']]) {
+      await assert.rejects(live(connection,credentials,sql),error=>error.diagnostic?.code===code && error.diagnostic.phase===phase && !error.message.includes('fixture-secret'));
+    }
     console.log('DBW_JDBC_FIXTURE_PASS');
   } finally {fs.rmSync(temp,{recursive:true,force:true});}
 }

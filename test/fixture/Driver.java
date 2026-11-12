@@ -32,6 +32,7 @@ public final class Driver implements java.sql.Driver {
     }
     @Override public Connection connect(String url, Properties props) throws SQLException {
         if (!acceptsURL(url)) throw new SQLException("No network in this fixture.");
+        if ("fixture-secret".equals(props.getProperty("password"))) throw new SQLException("fixture-secret", "28000", 1045);
         String expectedTls = url.contains(":3307/") ? "DISABLED" : "VERIFY_IDENTITY";
         if (!expectedTls.equals(props.getProperty("sslMode")) || !"false".equals(props.getProperty("allowMultiQueries"))
                 || !"false".equals(props.getProperty("allowPublicKeyRetrieval")) || !"false".equals(props.getProperty("allowLoadLocalInfile"))
@@ -67,6 +68,7 @@ public final class Driver implements java.sql.Driver {
                                 }
                                 if (sql.startsWith("explain") && url.contains(":9030/")) return grid(new String[]{"Plan"},new String[][]{{"VOlapScanNode\ncardinality=1"}});
                                 if (sql.startsWith("explain")) return grid(new String[]{"rows"},new String[][]{{sql.contains("999") ? "100001" : "1"}});
+                                if (sql.contains("permission_probe")) throw new SQLException("fixture-secret", "42000", 1142);
                                 if (sql.contains("timeout_probe")) throw new SQLException("Synthetic timeout", "HYT00", 0);
                                 if (sql.contains("999")) throw new AssertionError("Rejected SQL reached execution.");
                                 if (sql.startsWith("select /*+ ")) {

@@ -104,7 +104,7 @@ from tempfile import TemporaryDirectory
 with TemporaryDirectory(prefix="sqlquay-policy-capability-") as directory:
     wrapper=Path(directory)/"execute_safe.py"
     mark=Path(directory)/"executed"
-    wrapper.write_text("class SafeDmsExecutor: pass\ndef main():\n from pathlib import Path\n Path("+repr(str(mark))+").write_text('legacy call')\n return 0\n")
+    wrapper.write_text("from contextlib import nullcontext\nsingle_query_lock=nullcontext\nclass SafeDmsExecutor: pass\ndef main():\n from pathlib import Path\n Path("+repr(str(mark))+").write_text('legacy call')\n return 0\n")
     entry=str(Path(__file__).resolve().parent.parent/"scripts/dms_timed.py")
     common=[sys.executable,"-I","-B",entry,str(wrapper),"--sql=SELECT 1"]
     failed=subprocess.run(common+["--engine=drds"],capture_output=True,text=True)

@@ -1,5 +1,6 @@
 """Exact DMS identities and guarded DRDS plans; unknown engines fail closed."""
 import re
+from workbench_runtime import coded
 
 ENVIRONMENTS = {"product", "test", "dev", "pre", "sit", "uat", "pet", "stag"}
 ENGINE_TYPES = {
@@ -26,13 +27,15 @@ def drds_rows(sql, read):
     shards = read("EXPLAIN SHARDING " + sql)
     counts = [str(next((v for k, v in row.items() if k.upper() == "SHARD_COUNT"), "")) for row in shards]
     if len(counts) != 1 or counts[0] != "1":
-        raise ValueError("DRDS requires a verified single-shard plan. Narrow the shard-key predicate.")
+        known = len(counts) == 1 and re.fullmatch(r"[0-9]+", counts[0]) and int(counts[0]) > 1
+        raise coded(ValueError("DRDS requires a verified single-shard plan. Narrow the shard-key predicate."),
+                    "drds_multishard" if known else "drds_shard_unknown", **({"shards":int(counts[0])} if known else {}))
     plan = read("EXPLAIN EXECUTE " + sql)
     if len(plan) != 1:
-        raise ValueError("DRDS physical scan estimate is incomplete.")
+        raise coded(ValueError("DRDS physical scan estimate is incomplete."), "drds_plan_incomplete")
     value = next((v for k, v in plan[0].items() if k.lower() == "rows"), None)
     if isinstance(value, bool) or not re.fullmatch(r"[0-9]+", str(value)):
-        raise ValueError("DRDS physical scan estimate is unknown.")
+        raise coded(ValueError("DRDS physical scan estimate is unknown."), "scan_unknown")
     return int(value)
 
 def drds_timeout(sql):

@@ -91,6 +91,7 @@ button.secondary { background:var(--vscode-button-secondaryBackground,#3b3b3b); 
 .toolbar select { padding:3px 5px; }
 #message { padding:12px; color:var(--muted); border-bottom:1px solid var(--border); }
 #message.error { color:var(--vscode-errorForeground,#f48771); }
+#diagnostic { padding:8px; border-bottom:1px solid var(--border); }
 #phases { padding:5px 8px; border-bottom:1px solid var(--border); }
 .grid { overflow:auto; flex:1; }
 table { width:max-content; border-collapse:separate; border-spacing:0; text-align:left; font-variant-numeric:tabular-nums; }

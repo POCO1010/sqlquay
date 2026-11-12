@@ -8,6 +8,7 @@ import sys
 LIMIT = 100
 sys.path.insert(0, str(Path(__file__).resolve().parent.parent / "policy"))
 from engine_policy import drds_rows, drds_timeout, TABLESTORE_MESSAGE, compatible_policy
+from workbench_runtime import progress, diagnostic, remember_failure, coded
 
 WAREHOUSE = {"selectdb", "doris"}
 IDENTIFIER = re.compile(r"[\w$-]{1,128}")
@@ -93,7 +94,9 @@ def preview(guard, engine, schema, table, read, run):
         raise ScanUnknown(str(exc)) from exc
     ceiling = guard.ENGINE_ROW_LIMITS.get(engine)
     if estimate is None or ceiling is None or estimate > ceiling:
-        raise ScanUnknown("Full-scan estimate is unknown or exceeds the scan limit.")
+        raise coded(ScanUnknown("Full-scan estimate is unknown or exceeds the scan limit."),
+                    "scan_unknown" if estimate is None or ceiling is None else "scan_limit",
+                    **({"estimatedRows":estimate, "maxRows":ceiling} if estimate is not None and ceiling is not None else {}))
     hint = "SET_VAR(query_timeout=5)" if engine in WAREHOUSE else "MAX_EXECUTION_TIME(5000)"
     statement = f"SELECT /*+ {hint} */ {projection} LIMIT {LIMIT}"
     return run(drds_timeout(statement) if engine == "drds" else statement), columns
@@ -122,13 +125,14 @@ def main():
     from dms_timed import instrument, report as report_timings
     timings = instrument(safe)
 
-    def report(status):
-        print(json.dumps({"status": status}), file=sys.stderr)
+    def report(status, error=None):
+        print(json.dumps({"status": status, **({"diagnostic":diagnostic(error)} if error else {})}), file=sys.stderr, flush=True)
         return 3
 
     try:
         quote(args.schema)
         quote(args.table)
+        progress("waiting")
         with guard.single_query_lock():
             executor = safe.SafeDmsExecutor(profile=args.profile, region=args.region, timeout=10)
             try:
@@ -146,7 +150,11 @@ def main():
                             raise safe.QueryStateUnknownError("Preview stopped after a timeout.") from exc
                         raise
 
+                progress("preflight")
                 rows, columns = preview(guard, target.engine, target.schema, args.table, read, read)
+            except Exception as error:
+                remember_failure(error)
+                raise
             finally:
                 try:
                     executor._ai_mode_enabled = True
@@ -161,12 +169,12 @@ def main():
         return report("query_in_flight")
     except safe.QueryStateUnknownError:
         return report("server_state_unknown")
-    except ScanUnknown:
-        return report("needs_split")
-    except (PreviewRefused, safe.QueryRejectedError):
-        return report("blocked")
-    except safe.DmsSafeQueryError:
-        return report("execution_failed")
+    except ScanUnknown as error:
+        return report("needs_split", error)
+    except (PreviewRefused, safe.QueryRejectedError) as error:
+        return report("blocked", error)
+    except safe.DmsSafeQueryError as error:
+        return report("execution_failed", error)
     finally:
         report_timings(timings)
 

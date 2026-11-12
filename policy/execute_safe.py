@@ -40,6 +40,7 @@ POLICY_CAPABILITIES = frozenset({"drds-single-shard-v1", "ots-schema-only-v1", "
 PROFILE = "dms-prod"
 USER_AGENT = "AlibabaCloud-Agent-Skills/alibabacloud-dms-skill"
 from engine_policy import engine_type, drds_rows, drds_timeout, timeout_message
+from workbench_runtime import lifecycle_lock, coded, diagnostic
 
 SOURCE_ENGINES = {"mysql", "rds", "polardb", "drds", "source"}
 
@@ -450,7 +451,7 @@ class SafeDmsExecutor:
                 allow_select_star=allow_select_star, allow_sensitive_fields=allow_sensitive_fields,
                 max_estimated_rows=max_estimated_rows)
             if not approved["execution_allowed"]:
-                raise QueryNeedsSplitError("DRDS physical scan estimate exceeds the scan limit.")
+                raise coded(QueryNeedsSplitError("DRDS physical scan estimate exceeds the scan limit."), "scan_limit", estimatedRows=estimated_rows, maxRows=static["max_estimated_rows"])
             return self._execute_raw(target, drds_timeout(approved["sql"])), approved
 
         try:
@@ -487,10 +488,10 @@ class SafeDmsExecutor:
                 "EXPLAIN did not provide a usable row estimate or a verified single-Tablet scan; split by a smaller physical boundary."
             )
         if tablet_calibration and scan_gate_rows > static["max_estimated_rows"]:
-            raise QueryNeedsSplitError(
+            raise coded(QueryNeedsSplitError(
                 f"Tablet {tablet_calibration[0]} has a maximum healthy-replica RowCount of {scan_gate_rows}, "
                 f"exceeding the {static['max_estimated_rows']} per-query limit; find a smaller physical boundary."
-            )
+            ), "scan_limit", estimatedRows=scan_gate_rows, maxRows=static["max_estimated_rows"])
         approved = validate_sql(
             static["sql"],
             engine=target.engine,
@@ -503,7 +504,7 @@ class SafeDmsExecutor:
             if approved["violations"] and all(
                 violation.startswith("EXPLAIN estimates ") for violation in approved["violations"]
             ):
-                raise QueryNeedsSplitError("; ".join(approved["violations"]))
+                raise coded(QueryNeedsSplitError("; ".join(approved["violations"])), "scan_limit", estimatedRows=scan_gate_rows, maxRows=static["max_estimated_rows"])
             raise QueryRejectedError("; ".join(approved["violations"]))
         approved["explain_estimated_rows"] = estimated_rows
         approved["scan_gate"] = "tablet_row_count" if tablet_calibration else "explain"
@@ -597,7 +598,7 @@ def _public_batch_result(item: dict[str, Any]) -> dict[str, Any]:
 
 
 def _error_result(status: str, exc: DmsSafeQueryError) -> dict[str, Any]:
-    result: dict[str, Any] = {"status": status, "error": str(exc)}
+    result: dict[str, Any] = {"status": status, "error": str(exc), "diagnostic": diagnostic(exc)}
     if exc.query_trace_id:
         result["query_trace_id"] = exc.query_trace_id
     if isinstance(exc, QueryTimeoutStoppedError):
@@ -607,45 +608,7 @@ def _error_result(status: str, exc: DmsSafeQueryError) -> dict[str, Any]:
     return result
 
 
-def main() -> int:
-    parser = argparse.ArgumentParser(description=__doc__)
-    sql_group = parser.add_mutually_exclusive_group(required=True)
-    sql_group.add_argument("--sql")
-    sql_group.add_argument("--sql-file")
-    sql_group.add_argument("--batch-plan", help="JSON file containing [{id, sql}, ...] or {batches: [...]}")
-    sql_group.add_argument("--sql-template-file", help="SQL with {{batch_start}}/{{batch_end}} placeholders")
-    parser.add_argument("--database-keyword", required=True, help="DMS database search keyword")
-    parser.add_argument("--schema", help="Expected exact schema name")
-    parser.add_argument("--db-id", help="Expected DatabaseId; verified against DMS metadata")
-    parser.add_argument("--max-estimated-rows", type=int)
-    parser.add_argument("--allow-select-star", action="store_true")
-    parser.add_argument("--allow-sensitive-fields", action="store_true")
-    parser.add_argument("--bounded-pilot", action="store_true", help="Run one optimized, timed warehouse key-range aggregate with a trace ID")
-    parser.add_argument("--batch-start")
-    parser.add_argument("--batch-end")
-    parser.add_argument("--batch-days", type=int, default=1)
-    args = parser.parse_args()
-    if args.bounded_pilot and (args.batch_plan or args.sql_template_file):
-        parser.error("--bounded-pilot accepts one SQL statement, not a batch plan")
-
-    sql: str | None = None
-    batches: list[dict[str, str]] | None = None
-    try:
-        if args.batch_plan:
-            payload = json.loads(Path(args.batch_plan).read_text(encoding="utf-8-sig"))
-            batches = validate_batch_queries(payload.get("batches") if isinstance(payload, dict) else payload)
-        elif args.sql_template_file:
-            if not args.batch_start or not args.batch_end:
-                parser.error("--sql-template-file requires --batch-start and --batch-end")
-            template = Path(args.sql_template_file).read_text(encoding="utf-8-sig")
-            batches = build_date_batches(
-                template, args.batch_start, args.batch_end, batch_days=args.batch_days
-            )
-        else:
-            sql = args.sql if args.sql is not None else Path(args.sql_file).read_text(encoding="utf-8-sig")
-    except (OSError, ValueError, json.JSONDecodeError) as exc:
-        print(json.dumps({"status": "blocked", "error": f"Invalid query plan: {exc}"}, ensure_ascii=False), file=sys.stderr)
-        return 2
+def _run_session(args, sql, batches):
     executor: SafeDmsExecutor | None = None
     try:
         executor = SafeDmsExecutor()
@@ -693,6 +656,56 @@ def main() -> int:
                 "rows": rows,
             }, ensure_ascii=False, indent=2))
         return 0
+    finally:
+        if executor is not None:
+            try:
+                executor.disable_ai_mode()
+            except DmsSafeQueryError as exc:
+                print(json.dumps({"status": "cleanup_failed", "error": str(exc)}, ensure_ascii=False), file=sys.stderr)
+
+
+def main() -> int:
+    parser = argparse.ArgumentParser(description=__doc__)
+    sql_group = parser.add_mutually_exclusive_group(required=True)
+    sql_group.add_argument("--sql")
+    sql_group.add_argument("--sql-file")
+    sql_group.add_argument("--batch-plan", help="JSON file containing [{id, sql}, ...] or {batches: [...]}")
+    sql_group.add_argument("--sql-template-file", help="SQL with {{batch_start}}/{{batch_end}} placeholders")
+    parser.add_argument("--database-keyword", required=True, help="DMS database search keyword")
+    parser.add_argument("--schema", help="Expected exact schema name")
+    parser.add_argument("--db-id", help="Expected DatabaseId; verified against DMS metadata")
+    parser.add_argument("--max-estimated-rows", type=int)
+    parser.add_argument("--allow-select-star", action="store_true")
+    parser.add_argument("--allow-sensitive-fields", action="store_true")
+    parser.add_argument("--bounded-pilot", action="store_true", help="Run one optimized, timed warehouse key-range aggregate with a trace ID")
+    parser.add_argument("--batch-start")
+    parser.add_argument("--batch-end")
+    parser.add_argument("--batch-days", type=int, default=1)
+    args = parser.parse_args()
+    if args.bounded_pilot and (args.batch_plan or args.sql_template_file):
+        parser.error("--bounded-pilot accepts one SQL statement, not a batch plan")
+
+    sql: str | None = None
+    batches: list[dict[str, str]] | None = None
+    try:
+        if args.batch_plan:
+            payload = json.loads(Path(args.batch_plan).read_text(encoding="utf-8-sig"))
+            batches = validate_batch_queries(payload.get("batches") if isinstance(payload, dict) else payload)
+        elif args.sql_template_file:
+            if not args.batch_start or not args.batch_end:
+                parser.error("--sql-template-file requires --batch-start and --batch-end")
+            template = Path(args.sql_template_file).read_text(encoding="utf-8-sig")
+            batches = build_date_batches(
+                template, args.batch_start, args.batch_end, batch_days=args.batch_days
+            )
+        else:
+            sql = args.sql if args.sql is not None else Path(args.sql_file).read_text(encoding="utf-8-sig")
+    except (OSError, ValueError, json.JSONDecodeError) as exc:
+        print(json.dumps({"status": "blocked", "error": f"Invalid query plan: {exc}"}, ensure_ascii=False), file=sys.stderr)
+        return 2
+    try:
+        with lifecycle_lock(sys.modules[__name__]):
+            return _run_session(args, sql, batches)
     except QueryNeedsSplitError as exc:
         print(json.dumps(_error_result("needs_split", exc), ensure_ascii=False), file=sys.stderr)
         return 3
@@ -711,12 +724,7 @@ def main() -> int:
     except DmsSafeQueryError as exc:
         print(json.dumps(_error_result("execution_failed", exc), ensure_ascii=False), file=sys.stderr)
         return 3
-    finally:
-        if executor is not None:
-            try:
-                executor.disable_ai_mode()
-            except DmsSafeQueryError as exc:
-                print(json.dumps({"status": "cleanup_failed", "error": str(exc)}, ensure_ascii=False), file=sys.stderr)
+
 
 
 if __name__ == "__main__":

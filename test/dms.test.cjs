@@ -91,3 +91,13 @@ test('exact instance and non-production environments reach ordinary and preview 
   }
   for(const input of [{...target,environment:'unknown'},{...target,instanceId:'--bad'},{...target,engine:'polardb_pg'}])assert.throws(()=>dmsConfig(input));
 });
+
+test('specific DMS reasons remain safe and cleanup failures always keep the stop latch',async t=>{
+  for(const [code,message] of [['drds_multishard',/single-shard/],['drds_shard_unknown',/shard count is unknown/],['scan_unknown',/estimate is unknown/],['scan_limit',/scan limit/]]) {
+    const diagnostic={code,phase:'preflight',estimatedRows:100001,maxRows:100000,secret:'fixture-secret'};
+    const stderr=JSON.stringify({status:'needs_split',diagnostic,error:'fixture-secret'});
+    for(const table of [undefined,'products']) await assert.rejects(adapter(t,{code:3,stdout:'',stderr})(target,table?undefined:'SELECT 1',100,table),error=>message.test(error.message) && error.diagnostic.code===code && error.diagnostic.estimatedRows===100001 && !JSON.stringify(error).includes('fixture-secret'));
+  }
+  const reports=[{status:'execution_failed',diagnostic:{code:'scan_limit',phase:'preflight'}},{status:'diagnostic',diagnostic:{phase:'cleanup'}},{status:'cleanup_failed'}, {status:'configuration_error',reason:'search_failed'}];
+  await assert.rejects(adapter(t,{code:2,stdout:'',stderr:reports.map(JSON.stringify).join('\n')})(target,'SELECT 1'),error=>error instanceof DmsStopped && error.diagnostic.phase==='cleanup');
+});

@@ -172,7 +172,7 @@ function activate(context) {
   }
   const pendingChannel = () => context.globalState.get('jdbcPending',false) ? 'JDBC'
     : context.globalState.get('dmsPending',false) ? 'DMS' : undefined;
-  async function query(connection, sql, limit = 200, credentials, table) {
+  async function query(connection, sql, limit = 200, credentials, table, onProgress) {
     const channel = channelOf(connection);
     if (channel === 'demo') {
       if (table === 'products') return demoQuery('SELECT id, name, category, price FROM products LIMIT 100');
@@ -188,10 +188,10 @@ function activate(context) {
     try {
       const settings = cfg(), python = settings.get('pythonPath');
       const execute = channel === 'dms'
-        ? async () => makeDms({python,wrapper:settings.get('dmsWrapperPath') || path.join(context.extensionPath,'policy','execute_safe.py')})(connection,sql,limit,table,authMode(connection)==='accessKey' ? credentials??await dmsCredentialsFor(connection) : undefined)
+        ? async () => makeDms({python,onProgress,wrapper:settings.get('dmsWrapperPath') || path.join(context.extensionPath,'policy','execute_safe.py')})(connection,sql,limit,table,authMode(connection)==='accessKey' ? credentials??await dmsCredentialsFor(connection) : undefined)
         : async () => {
           const auth = credentials ?? await credentialsFor(connection);
-          return makeJdbc({java:settings.get('javaPath'),python,jar:settings.get('driverJar'),guard:settings.get('guardPath') || path.join(context.extensionPath,'policy','query_guard.py')},context.extensionPath)(connection,auth,sql,limit,table);
+          return makeJdbc({onProgress,java:settings.get('javaPath'),python,jar:settings.get('driverJar'),guard:settings.get('guardPath') || path.join(context.extensionPath,'policy','query_guard.py')},context.extensionPath)(connection,auth,sql,limit,table);
         };
       await context.globalState.update(key,true);
       try {
@@ -778,11 +778,12 @@ function activate(context) {
     running=true;
     try {
       showResult(entry);publish(entry);
-      const result=table===undefined ? await query(connection,readonly(sql)) : await query(connection,undefined,100,undefined,table);
+      const onProgress=phase=>{if(entry.view.state==='running') {entry.view.phase=phase;publish(entry);}};
+      const result=table===undefined ? await query(connection,readonly(sql),200,undefined,undefined,onProgress) : await query(connection,undefined,100,undefined,table,onProgress);
       entry.view={...entry.view,state:'done',elapsed:Math.round(performance.now()-start),result,timings:result.timings};
       publish(entry);return result;
     } catch(error) {
-      entry.view={...entry.view,state:'error',elapsed:Math.round(performance.now()-start),error:tr(error.message),timings:error.timings};
+      entry.view={...entry.view,state:'error',elapsed:Math.round(performance.now()-start),error:tr(error.message),timings:error.timings,diagnostic:error.diagnostic};
       publish(entry);
     } finally {running=false;}
   }

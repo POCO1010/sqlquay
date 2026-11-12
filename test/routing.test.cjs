@@ -56,7 +56,8 @@ for(const language of ['zh-cn','en']) test('connection routing, safety gates, ho
     Module._load=function(request,parent,isMain){
       if (parent?.filename.endsWith('/src/extension.cjs')) {
         if(request==='vscode') return vscode;
-        if(request==='./jdbc.cjs') return {...load.apply(this,arguments),makeJdbc:()=>async(connection,credentials,sql,limit,table)=>{
+        if(request==='./jdbc.cjs') return {...load.apply(this,arguments),makeJdbc:settings=>async(connection,credentials,sql,limit,table)=>{
+          settings.onProgress?.('connect');
           if (table) { calls.push(['preview','jdbc',connection.id,table,limit]);return grid(['id'],[['1']]); }
           calls.push(['jdbc',connection.id,sql]);assert.equal(credentials.user,'reader');
           if(blocker) await blocker;
@@ -72,7 +73,8 @@ for(const language of ['zh-cn','en']) test('connection routing, safety gates, ho
             return {instance,databases:[{...instance,keyword:'sandbox',database:'sandbox',databaseId:String(420+Number(instance.instanceId)),label:'sandbox · '+instance.instanceName}],page:1,more:false};
           },
           searchDmsDatabases:async(_settings,search,auth)=>{akSearches.push(search);assert.deepEqual(auth,akAuth);const target=search.keyword==='multi-b'?{database:'orders',databaseId:'43'}:search.keyword==='multi-c'?{database:'dimensions',databaseId:'44'}:{database:'sandbox',databaseId:'42'};return {databases:[{...target,engine:'mysql',label:target.database+' · Fixture · #'+target.databaseId}],more:false};},
-          makeDms:()=>async(connection,sql,limit,table,auth)=>{
+          makeDms:settings=>async(connection,sql,limit,table,auth)=>{
+          settings.onProgress?.('preflight');
           if(connection.authMode==='accessKey' && akQueryGate) {const gate=akQueryGate;akQueryGate=undefined;akQueryStarted?.();await gate;}
           if(connection.authMode==='accessKey') {assert.deepEqual(auth,akAuth);akExecutions.push({id:connection.id,accountId:connection.accountId,database:connection.database,databaseId:connection.databaseId,sql,table});}
           if (table) { calls.push(['preview','dms',connection.id,table,limit]);return grid(['id'],[['2']]); }
@@ -399,6 +401,8 @@ for(const language of ['zh-cn','en']) test('connection routing, safety gates, ho
   blocker=new Promise(resolve=>{release=resolve;});
   const pending=run('run');
   for(let i=0;i<20 && calls.at(-1)?.[2]!=='SELECT 1 AS probe';i++) await new Promise(resolve=>setImmediate(resolve));
+  assert.equal(currentPanel().messages.at(-1).state,'running');
+  assert.equal(currentPanel().messages.at(-1).phase,'connect');
   const whileRunning=calls.length;
   await run('run');
   includes(errors.pop(),'Wait for the active query to finish.');

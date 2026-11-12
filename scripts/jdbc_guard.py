@@ -13,6 +13,7 @@ import time
 
 sys.path.insert(0, str(Path(__file__).resolve().parent.parent / "policy"))
 from engine_policy import drds_rows, drds_timeout
+from workbench_runtime import progress, diagnostic, remember_failure, coded
 
 
 class Refused(Exception):
@@ -66,7 +67,7 @@ def governed(guard, engine, check, run, limit):
             except ValueError as exc:
                 raise Refused(str(exc)) from exc
             if rows > check["max_estimated_rows"]:
-                raise Refused("DRDS physical scan estimate exceeds the scan limit.")
+                raise coded(Refused("DRDS physical scan estimate exceeds the scan limit."), "scan_limit", estimatedRows=rows, maxRows=check["max_estimated_rows"])
             return run(drds_timeout(check["sql"]), limit)
         plan = as_records(run(guard.explain_sql(check["sql"]), 10000))
         if engine == "doris":
@@ -75,7 +76,8 @@ def governed(guard, engine, check, run, limit):
                 raise Refused("The plan did not establish an internal Doris OLAP scan.")
         rows = guard.estimate_rows_from_explain(plan)
         if rows is None or rows > check["max_estimated_rows"]:
-            raise Refused("Scan estimate is unknown or above the limit. Narrow the query.")
+            raise coded(Refused("Scan estimate is unknown or above the limit. Narrow the query."),
+                        "scan_unknown" if rows is None else "scan_limit", **({"estimatedRows":rows,"maxRows":check["max_estimated_rows"]} if rows is not None else {}))
     return run(check["sql"], limit)
 
 
@@ -118,7 +120,12 @@ def exchange(proc, request, operation):
             code = reply.get("code", 0)
             if may_have_executed and (reply.get("timeout") is True or not state or state.startswith(("08", "HYT")) or code in (1317, 3024, 4202, 4203)):
                 raise Unknown()
-            raise Refused(f"JDBC SQLSTATE {state or 'unknown'} ({code}).")
+            error = Refused(f"JDBC SQLSTATE {state or 'unknown'} ({code}).")
+            if state.startswith("28") or code == 1045:
+                raise coded(error, "authentication_failed")
+            if state == "42501" or code in (1044, 1142, 1143, 1227):
+                raise coded(error, "permission_denied")
+            raise error
         if reply.get("error") == "driver":
             raise Refused("Use the official MySQL Connector/J 8.0.12 or newer.")
         if reply.get("error") == "size":
@@ -157,9 +164,13 @@ def main():
         def run(sql, limit):
             final = guard.first_token(sql) == "select" if is_preview else guard.strip_comments(sql).strip() == check["sql"]
             phase = "execute" if final else "preflight"
+            progress(phase)
             start = time.perf_counter()
             try:
                 return raw_run(sql, limit)
+            except Exception as error:
+                remember_failure(error)
+                raise
             finally:
                 timings[phase] += (time.perf_counter() - start) * 1000
         if not is_preview:
@@ -177,13 +188,16 @@ def main():
         return result
 
     try:
+        progress("preflight")
         is_preview = "table" in request
         if is_preview:
             quote(request["schema"])
             quote(request["table"])
         else:
             check = policy(guard, request["engine"], request["sql"])
+        progress("waiting")
         with guard.single_query_lock():
+            progress("connect")
             connect_start = time.perf_counter()
             proc = subprocess.Popen(
                 [args.java, "-Xmx128m", "-cp", args.classpath, "WorkbenchJdbc"],
@@ -191,7 +205,11 @@ def main():
                 text=True, encoding="utf-8")
             try:
                 return reply(exchange(proc, request, execute))
+            except Exception as error:
+                remember_failure(error)
+                raise
             finally:
+                progress("cleanup")
                 proc.stdin.close()
                 try:
                     proc.wait(timeout=1)
@@ -199,9 +217,9 @@ def main():
                     proc.kill()
                     proc.wait()
     except (Refused, PreviewRefused, guard.QueryLockError, FileNotFoundError) as exc:
-        return reply({"error": "blocked", "message": str(exc) if not isinstance(exc, FileNotFoundError) else "Java executable was not found."})
-    except Unknown:
-        return reply({"error": "unknown"})
+        return reply({"error": "blocked", "message": str(exc) if not isinstance(exc, FileNotFoundError) else "Java executable was not found.", "diagnostic":diagnostic(exc)})
+    except Unknown as error:
+        return reply({"error": "unknown", "diagnostic":diagnostic(error)})
 
 
 if __name__ == "__main__":

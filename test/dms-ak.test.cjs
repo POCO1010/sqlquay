@@ -30,7 +30,7 @@ test('real local AK runner isolates CLI files and environment; search, query and
   const before={...process.env},project=path.join(temp,'project'),log=path.join(temp,'calls.jsonl');
   t.after(()=>{for(const key of Object.keys(process.env)) if(!Object.hasOwn(before,key)) delete process.env[key];Object.assign(process.env,before);fs.rmSync(temp,{recursive:true,force:true});});
   for(const dir of ['src','scripts','policy']) fs.mkdirSync(path.join(project,dir),{recursive:true});
-  for(const file of ['src/dms.cjs','src/jdbc.cjs','src/query.cjs','scripts/dms_ak.py','scripts/dms_catalog.py','scripts/dms_timed.py','scripts/preview_safe.py','policy/execute_safe.py','policy/query_guard.py','policy/engine_policy.py']) fs.copyFileSync(path.join(root,file),path.join(project,file));
+  for(const file of ['src/dms.cjs','src/execution.cjs','src/jdbc.cjs','src/query.cjs','scripts/dms_ak.py','scripts/dms_catalog.py','scripts/dms_timed.py','scripts/preview_safe.py','policy/execute_safe.py','policy/query_guard.py','policy/engine_policy.py','policy/workbench_runtime.py']) fs.copyFileSync(path.join(root,file),path.join(project,file));
   fs.appendFileSync(path.join(project,'policy/query_guard.py'),"\nfrom functools import partial\nsingle_query_lock=partial(single_query_lock,path=Path(__file__).parent/'fixture.lock')\n");
   const python=execFileSync('python3',['-c','import sys;print(sys.executable)'],{encoding:'utf8'}).trim();
   fs.writeFileSync(path.join(temp,'aliyun'),'#!'+python+'\n'+String.raw`
@@ -129,7 +129,7 @@ print(json.dumps({'Results':[{'Success':True,'Rows':rows}]}))
   assert.deepEqual((await query(drds,'SELECT id FROM products WHERE id=1 LIMIT 1',200,undefined,auth)).rows,[['1']]);
   const drdsPreview=await query(drds,undefined,100,'products',auth);assert.deepEqual(drdsPreview.rows,[['1']]);
   assert.ok(drdsPreview.timings.preflight>0 && drdsPreview.timings.execute>0);
-  await assert.rejects(query(drds,'SELECT id AS multi_shard FROM products WHERE id=1 LIMIT 1',200,undefined,auth),/scan budget/);
+  await assert.rejects(query(drds,'SELECT id AS multi_shard FROM products WHERE id=1 LIMIT 1',200,undefined,auth),error=>error.diagnostic?.code==='drds_multishard' && error.diagnostic.shards===2);
   await assert.rejects(query(drds,'SELECT id FROM products WHERE id=1 LIMIT 1',200,'large',auth),/scan limit/);
   await assert.rejects(query(drds,'SELECT id AS drds_timeout FROM products WHERE id=1 LIMIT 1',200,undefined,auth),local.DmsStopped);
   assert.equal(calls().filter(x=>x.script.startsWith('/*TDDL:') && x.script.includes('drds_timeout')).length,1);
@@ -147,4 +147,9 @@ print(json.dumps({'Results':[{'Success':True,'Rows':rows}]}))
   process.env.SQLQUAY_FIXTURE_FAIL='cleanup';
   await assert.rejects(local.searchDmsDatabases({python},target,auth),error=>error instanceof local.DmsStopped);
   entries=calls();assert.equal(entries.filter(row=>row.operation[1]==='search-database').length,7);
+  delete process.env.SQLQUAY_FIXTURE_FAIL;
+  let completed=false;const phases=[];
+  const live=local.makeDms({python,onProgress:phase=>{assert.equal(completed,false);phases.push(phase);}});
+  await live(target,'SELECT 1 AS probe',200,undefined,auth);completed=true;
+  assert.deepEqual(phases,['prepare','waiting','connect','resolve','preflight','execute','cleanup']);
 });

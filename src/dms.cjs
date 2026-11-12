@@ -4,6 +4,7 @@ const {accessSync, constants} = require('node:fs');
 const path = require('node:path');
 const {expand} = require('./jdbc.cjs');
 const {dmsReadonly} = require('./query.cjs');
+const {progressReader,diagnosticError,attachDiagnostic}=require('./execution.cjs');
 
 class DmsStopped extends Error {}
 const profileName=value=>typeof value==='string' && value.length>0 && value.length<=128 && !/^[\s-]|[\x00-\x1f\x7f]/.test(value);
@@ -68,11 +69,12 @@ function searchConfig(input) {
   if(!keyword || keyword.length>128 || /[\x00-\x1f]/.test(keyword) || !/^[a-z]{2}-[a-z0-9-]{1,40}$/.test(region)) throw Error('Enter a region and a database name.');
   return {keyword,region};
 }
-function call(command, args, input) {
+function call(command, args, input, onProgress) {
   return new Promise((resolve,reject) => {
     const child = spawn(command,args,{stdio:[input===undefined?'ignore':'pipe','pipe','pipe'],windowsHide:true});
     const buffers = {stdout:[],stderr:[]}, sizes = {stdout:0,stderr:0};
     const cap = 16 * 1024 * 1024;
+    child.stderr.on('data',progressReader(onProgress));
     for (const key of ['stdout','stderr']) child[key].on('data', chunk => {
       sizes[key] += chunk.length;
       if (sizes[key] <= cap) buffers[key].push(chunk);
@@ -135,6 +137,7 @@ function grid(rows, sql, limit, columns) {
 function makeDms(settings, transport = call) {
   return async (connection, sql, limit = 200, table, credentials) => {
     const target = dmsConfig(connection), statement = table === undefined ? dmsReadonly(connection.engine==='ots' && sql==='SHOW TABLES'?'SHOW FULL TABLES':sql) : '';
+    settings.onProgress?.('prepare');
     const independent=authMode(target)==='accessKey';
     const auth=independent ? accessKeyCredentials(credentials) : undefined;
     const wrapper = independent ? path.join(__dirname,'..','policy','execute_safe.py') : expand(settings.wrapper);
@@ -156,28 +159,30 @@ function makeDms(settings, transport = call) {
       const args=table === undefined ? ['-I','-B',path.join(__dirname,'..','scripts','dms_timed.py'),wrapper,...targetArgs,'--sql='+statement] :
         ['-I','-B',path.join(__dirname,'..','scripts','preview_safe.py'),...targetArgs,'--safe-wrapper='+wrapper,'--table='+table];
       response = independent
-        ? await transport(expand(settings.python),['-I','-B',path.join(__dirname,'..','scripts','dms_ak.py'),table===undefined?'query':'preview',...targetArgs,...(table===undefined?['--sql='+statement]:['--table='+table])],auth)
-        : await transport(expand(settings.python),args);
+        ? await transport(expand(settings.python),['-I','-B',path.join(__dirname,'..','scripts','dms_ak.py'),table===undefined?'query':'preview',...targetArgs,...(table===undefined?['--sql='+statement]:['--table='+table])],auth,settings.onProgress)
+        : await transport(expand(settings.python),args,undefined,settings.onProgress);
     } catch (error) {
       if (error.code === 'ENOENT') throw Error('Python executable was not found.');
       throw new DmsStopped('DMS wrapper exited unexpectedly. Verify query and AI Mode state.');
     }
-    setupFailure(response);
     const reports = response.stderr.split(/\r?\n/).flatMap(line=>{
       try { const value=JSON.parse(line);return object(value) ? [value] : []; } catch { return []; }
     });
     const timing=reports.find(r=>r.status==='timing')?.timings;
     const timings=timing && ['connect','preflight','execute'].every(k=>Number.isFinite(timing[k]) && timing[k]>=0) ? timing : undefined;
-    const fail=error=>{error.timings=timings;return error;};
-    const stop = reports.find(r=>Object.hasOwn(locked,r.status));
-    if (stop || response.stderrOverflow) throw fail(new DmsStopped(locked[stop?.status] ?? 'DMS did not return a complete status.'));
     const failure = reports.find(r=>Object.hasOwn(known,r.status));
+    const stop = reports.find(r=>Object.hasOwn(locked,r.status));
+    const lastDetail=[...reports].reverse().find(r=>r.status==='diagnostic')?.diagnostic;
+    const detail=stop?.status==='cleanup_failed' ? lastDetail : failure?.diagnostic ?? lastDetail;
+    const fail=error=>{error.timings=timings;return attachDiagnostic(error,detail);};
+    if (stop || response.stderrOverflow) throw fail(new DmsStopped(locked[stop?.status] ?? 'DMS did not return a complete status.'));
+    try {setupFailure(response);} catch(error) {throw fail(error);}
     if (failure) {
       if(failure.status==='blocked' && failure.error==='External policy lacks required engine capabilities.') throw fail(Error(setupMessages.policy_incompatible));
-      if (table !== undefined && failure.status==='needs_split') throw fail(Error("Cannot confirm the full-table scan size, or its estimate exceeds the scan limit. No data was read."));
+      if (table !== undefined && failure.status==='needs_split') throw fail(diagnosticError(detail,"Cannot confirm the full-table scan size, or its estimate exceeds the scan limit. No data was read."));
       if(failure.status==='blocked' && typeof failure.error==='string' && failure.error.includes('Tablestore supports databases')) throw fail(Error('Tablestore supports databases, tables and DDL only. Data queries and previews require verified EXPLAIN support.'));
       const targetMiss = failure.status==='blocked' && typeof failure.error==='string' && failure.error.startsWith('Database metadata did not resolve');
-      throw fail(Error(targetMiss ? 'DMS target not found. Verify the instance, environment, database name and Database ID.' : known[failure.status]));
+      throw fail(diagnosticError(detail,targetMiss ? 'DMS target not found. Verify the instance, environment, database name and Database ID.' : known[failure.status]));
     }
     if (response.code === 0 && response.stdoutOverflow) throw Error('DMS result exceeded the display size limit. Select fewer columns or rows.');
     let out;

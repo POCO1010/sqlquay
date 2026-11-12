@@ -5,7 +5,7 @@
 !CHANGELOG.md
 !LICENSE
 !THIRD_PARTY_NOTICES.md
-!src/{completion,ddl,dms,embedded,extension,jdbc,migration,query,sessions,webviews}.cjs
+!src/{completion,ddl,dms,embedded,execution,extension,jdbc,migration,query,sessions,webviews}.cjs
 !media/**
 !policy/**
 !scripts/jdbc_guard.py

@@ -3,6 +3,8 @@
   const vscode = acquireVsCodeApi();
   const tr=window.SQLQuayI18n.translator(document.documentElement.lang);
   const $ = id => document.getElementById(id);
+  const phaseNames={prepare:"Preparation",waiting:"Query lock",connect:"Connection",resolve:"Target verification",preflight:"Read-only preflight",execute:"SQL execution",cleanup:"Session cleanup"};
+  const phaseName=phase=>tr(phaseNames[phase]??'Preparation');
   if (document.body.dataset.view === 'connect') {
     const form = $('connection'), feedback = $('feedback'),databaseInput=form.elements.keyword;
     let engine='mysql',editing=false,profiles=[],databases=[],searchedKeyword='';
@@ -299,7 +301,15 @@
       const t=m.timings, phases=$('phases');
       phases.hidden=!t || !['connect','preflight','execute'].every(k=>Number.isFinite(t[k]) && t[k]>=0);
       phases.textContent=phases.hidden ? '' : tr('Connection {0} ms · Preflight {1} ms · Execution {2} ms · Other {3} ms',Math.round(t.connect),Math.round(t.preflight),Math.round(t.execute),Math.max(0,Math.round((m.elapsed??0)-t.connect-t.preflight-t.execute)));
-      message.textContent = m.state==='running' ? tr("Running query…") : m.error ?? (m.result?.truncated ? tr("Showing the first rows returned within the display limit.") : data.length===0 ? tr("No rows returned.") : '');
+      const detail=m.diagnostic, diagnostics=[];
+      if(m.state==='error' && detail && typeof detail==='object') {
+        if(Object.hasOwn(phaseNames,detail.phase)) diagnostics.push(tr('Stopped during {0}',phaseName(detail.phase)));
+        if(Number.isSafeInteger(detail.estimatedRows) && detail.estimatedRows>=0) diagnostics.push(tr('Estimated scan: {0} rows',detail.estimatedRows));
+        if(Number.isSafeInteger(detail.maxRows) && detail.maxRows>=0) diagnostics.push(tr('Scan limit: {0} rows',detail.maxRows));
+        if(Number.isSafeInteger(detail.shards) && detail.shards>=0) diagnostics.push(tr('Shards: {0} / allowed: 1',detail.shards));
+      }
+      $('diagnostic').textContent=diagnostics.join(' · ');$('diagnostic').hidden=!diagnostics.length;
+      message.textContent = m.state==='running' ? (m.phase ? tr('Current phase: {0}',phaseName(m.phase)) : tr("Running query…")) : m.error ?? (m.result?.truncated ? tr("Showing the first rows returned within the display limit.") : data.length===0 ? tr("No rows returned.") : '');
       message.classList.toggle('error',m.state==='error');
       message.hidden = !message.textContent;
       draw();

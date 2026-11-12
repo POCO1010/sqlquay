@@ -8,12 +8,17 @@ import time
 
 def instrument(safe, expected=None, *, profile=None, region=None, environment=None, instance_id=None):
     timings = {"connect": 0, "preflight": 0, "execute": 0}
+    from workbench_runtime import progress, remember_failure
     original = safe.SafeDmsExecutor
 
-    def measure(phase, operation):
+    def measure(phase, operation, event=None):
+        progress(event or phase)
         start = time.perf_counter()
         try:
             return operation()
+        except Exception as error:
+            remember_failure(error)
+            raise
         finally:
             timings[phase] += (time.perf_counter() - start) * 1000
 
@@ -27,6 +32,27 @@ def instrument(safe, expected=None, *, profile=None, region=None, environment=No
 
         def enable_ai_mode(self):
             return measure("connect", super().enable_ai_mode)
+
+        def disable_ai_mode(self):
+            progress("cleanup")
+            try: return super().disable_ai_mode()
+            except Exception as error:
+                remember_failure(error)
+                raise
+
+        def execute(self, *args, **kwargs):
+            progress("preflight")
+            try: return super().execute(*args, **kwargs)
+            except Exception as error:
+                remember_failure(error)
+                raise
+
+        def execute_batches(self, *args, **kwargs):
+            progress("preflight")
+            try: return super().execute_batches(*args, **kwargs)
+            except Exception as error:
+                remember_failure(error)
+                raise
 
         def command_json(self, command, extra):
             data = super().command_json(command, extra)
@@ -46,7 +72,7 @@ def instrument(safe, expected=None, *, profile=None, region=None, environment=No
                 kwargs["environment"] = environment
             if instance_id is not None:
                 kwargs["instance_id"] = instance_id
-            return measure("connect", lambda: super(TimedExecutor, self).resolve_database(*args, **kwargs))
+            return measure("connect", lambda: super(TimedExecutor, self).resolve_database(*args, **kwargs), "resolve")
 
         def _execute_raw(self, target, sql):
             final = safe.strip_comments(sql).strip().rstrip(";") == safe.strip_comments(expected).strip().rstrip(";") if expected is not None else safe.first_token(sql) == "select"
@@ -77,13 +103,20 @@ def main():
     import execute_safe as safe
     sys.path.insert(0, str(Path(__file__).resolve().parent.parent / "policy"))
     from engine_policy import compatible_policy
+    from workbench_runtime import lifecycle_lock, progress
+    from query_guard import QueryLockError
     if not compatible_policy(safe, settings.engine, settings.instance_id):
         print(json.dumps({"status":"configuration_error","reason":"policy_incompatible"}), file=sys.stderr)
         return 2
     sql = next(arg.split("=", 1)[1] for arg in sys.argv if arg.startswith("--sql="))
     timings = instrument(safe, sql.strip().rstrip(";"), profile=settings.profile, region=settings.region, environment=settings.environment, instance_id=settings.instance_id)
     try:
-        return safe.main()
+        progress("waiting")
+        with lifecycle_lock(safe):
+            return safe.main()
+    except QueryLockError:
+        print(json.dumps({"status":"query_in_flight"}), file=sys.stderr, flush=True)
+        return 5
     finally:
         report(timings)
 

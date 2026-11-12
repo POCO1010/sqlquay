@@ -67,7 +67,7 @@ test('result updates, counts, phases and pin controls work in both languages; da
   }
 });
 test('owned runtime error strings have translations and non-catalog sources use canonical English',()=>{
-  for(const name of ['extension','jdbc','dms','query','ddl','embedded','sessions','migration']) {
+  for(const name of ['extension','execution','jdbc','dms','query','ddl','embedded','sessions','migration']) {
     const source=fs.readFileSync(path.join(root,'src',name+'.cjs'),'utf8');
     assert.doesNotMatch(source,/\p{Script=Han}/u,name);
     for(const match of source.matchAll(/(?:Error|UnknownState|DmsStopped)\((?:tr\()?(['"])(.*?)\1/g)) {

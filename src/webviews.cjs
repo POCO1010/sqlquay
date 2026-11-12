@@ -100,6 +100,7 @@ function resultHtml(assets) {
 </div>
 <div id="phases" class="subdued" title="${h("Phase times come from the execution wrapper. Other time includes local processing, transfer and cleanup. Only measured values are shown.")}" hidden></div>
 <div id="message" role="status" aria-live="polite" hidden></div>
+<div id="diagnostic" class="subdued" role="note" hidden></div>
 <div class="grid" id="grid"><table aria-label="${h("SQL results")}"><thead></thead><tbody></tbody></table></div>
 </main>`);
 }
