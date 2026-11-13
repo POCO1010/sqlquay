@@ -1,4 +1,4 @@
-# SQLQuay 的首发与维护
+# SQLQuay 的发布与维护
 
 ## 已确定的发行身份
 
@@ -30,15 +30,15 @@ npm run package
 
 JDBC/DMS 的只读策略位于 `policy/`，没有真实连接、数据库 ID 或账号；设置留空即使用附带策略。组织批准的外置策略仍可显式指定，迁移旧安装时保留原策略路径和锁范围。独立 AccessKey 使用附带的隔离执行器；DMS 外置覆盖仅用于已有 CLI profile 方式。两种方式继续做目标核对、EXPLAIN、扫描阈值、单查询锁及超时不重试。
 
-## 首次手动上传
+## 手动上传或更新版本
 
 1. 在独立 VS Code 配置中安装正式 VSIX，完成 Demo、两种通道的离线夹具与迁移验证。
 2. 打开 [TomMajor 管理页](https://marketplace.visualstudio.com/manage/publishers/TomMajor)。
-3. 新建 Visual Studio Code 扩展，只上传 `sqlquay-0.8.2.vsix`。不要上传 `sqlquay-legacy-migration-0.4.3.vsix`。
+3. 在现有 SQLQuay 扩展的菜单中选择更新版本，只上传 `sqlquay-0.8.2.vsix`。不要上传 `sqlquay-legacy-migration-0.4.3.vsix`。
 4. 根据平台返回的校验结果处理，核对展示名、Publisher、版本、MIT 许可和安装说明。
 5. 从市场下载到独立配置验收，再安排已有用户迁移；不要删除旧版数据或唯一可用的旧 VSIX。
 
-官方支持打包后手动上传：[发布指南](https://code.visualstudio.com/api/working-with-extensions/publishing-extension)。本地打包不需要 Publisher Token。平台上传由所有者确认执行。
+官方支持打包后手动上传：[发布指南](https://code.visualstudio.com/api/working-with-extensions/publishing-extension)。本地打包不需要 Publisher Token。上传前核对当前版本、正式包与发布授权。
 
 ## GitHub CI 与后续自动发布
 

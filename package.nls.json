@@ -1,5 +1,5 @@
 {
-  "extension.description": "SQLQuay — a read-only SQL workbench with JDBC, Alibaba Cloud DMS, DDL hover and session results.",
+  "extension.description": "Read-only SQL workbench with JDBC, Alibaba Cloud DMS, DDL hover, table preview and multi-result tools.",
   "view.database": "Database",
   "command.connect": "New Connection",
   "command.newQuery": "New Query",

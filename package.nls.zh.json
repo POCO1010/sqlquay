@@ -1,5 +1,5 @@
 {
-  "extension.description": "SQLQuay — 支持 JDBC、阿里云 DMS、DDL 悬停预览和会话结果的只读 SQL 工作台。",
+  "extension.description": "支持 JDBC 与阿里云 DMS 的只读 SQL 工作台：DDL 悬停、表预览、多结果、选区复制与 JSON 查看。",
   "view.database": "数据库",
   "command.connect": "新建连接",
   "command.newQuery": "新建查询",
